@@ -1,0 +1,122 @@
+// 쇼핑몰 기본 ERD
+// dbdiagram.io에서 사용 가능한 DBML 형식
+// 테이블명: tb_ 접두사, 컬럼명: 테이블 약자 접두사 사용
+// 현재 ERP 시스템과 동일한 구조 사용 (tb_role, tb_user_role)
+
+Table tb_user {
+  us_id integer [primary key, increment, note: '사용자 ID']
+  us_email varchar [unique, note: '이메일 주소']
+  us_password varchar [note: '비밀번호 (일반 계정 필수, SNS 계정은 NULL)']
+  us_name varchar [note: '이름']
+  us_phone varchar(50) [note: '휴대전화']
+  us_phone_landline varchar(50) [note: '일반전화']
+  us_picture varchar [note: '프로필 사진 URL']
+  
+  // 계정 타입 (주 로그인 방식)
+  us_account_type varchar [not null, default: 'NORMAL', note: '계정 타입: NORMAL(일반), KAKAO(카카오), NAVER(네이버), GOOGLE(구글)']
+  us_is_active boolean [default: true, note: '활성화 여부']
+  
+  // 주소 정보
+  us_postal_code varchar [note: '우편번호']
+  us_address varchar [note: '기본주소']
+  us_address_detail varchar [note: '상세주소 (나머지 주소)']
+  
+  // 회원구분 (기본값, 실제 사업자 정보는 tb_user_business에서 관리)
+  us_member_type varchar [note: '회원구분: NON_BUSINESS(비사업자/축산경영자), BUSINESS(사업자/축산경영자)']
+  
+  // 추가정보 (선택)
+  us_region_id integer [note: '지역 ID (시/도, FK)']
+  us_city_id integer [note: '시/군/구 ID (FK, 배송비 계산용)']
+  us_livestock_types varchar [note: '축산 종류 (한우,낙우,염소,말,기타 - 쉼표로 구분)']
+  us_livestock_count_range varchar [note: '사육두수 범위: UNDER_100(100두 이하), 100_200(100~200두), 200_300(200~300두), OVER_300(300두 이상)']
+  
+  // 포인트 및 등급
+  us_point_balance integer [default: 0, note: '보유 포인트']
+  us_total_purchase_amount decimal(10,2) [default: 0, note: '총 구매 금액']
+  us_grade varchar [default: 'BRONZE', note: '회원 등급 (BRONZE, SILVER, GOLD, PLATINUM)']
+  
+  // 추가 정보
+  us_birth_date date [note: '생년월일']
+  us_gender varchar [note: '성별 (M, F)']
+  us_last_login_at timestamp [note: '마지막 로그인 시간']
+  us_created_at timestamp [default: `now()`, note: '생성일시']
+  us_updated_at timestamp [note: '수정일시']
+}
+
+Table tb_role {
+  ro_id integer [primary key, increment, note: '역할 ID']
+  ro_name varchar [unique, note: '역할명']
+  ro_code varchar [unique, note: '역할 코드 (예: ROLE_SYSTEM, ROLE_SALES, ROLE_DISPATCH_COMPANY_USER)']
+  ro_description varchar [note: '역할 설명']
+  ro_is_active boolean [default: true, note: '활성화 여부']
+  ro_created_at timestamp [default: `now()`, note: '생성일시']
+  ro_updated_at timestamp [note: '수정일시']
+}
+
+Table tb_user_role {
+  ur_user_id integer [not null, note: '사용자 ID (FK)']
+  ur_role_id integer [not null, note: '역할 ID (FK)']
+}
+
+Table tb_cate {
+  ca_id bigint [primary key, increment, note: '카테고리 ID']
+  ca_group varchar [not null, note: '코드 그룹 (예: PRODUCT_CATEGORY, ORDER_STATUS, PAYMENT_METHOD)']
+  ca_name varchar [not null, note: '표시명 (한글)']
+  ca_value varchar [note: '코드 값 (영문 등)']
+  ca_order integer [default: 0, note: '정렬 순서']
+}
+
+Table tb_region {
+  re_id integer [primary key, increment, note: '지역 ID (시/도)']
+  re_name varchar(50) [unique, note: '지역명']
+  re_code varchar(20) [note: '지역 코드']
+  re_order integer [default: 0, note: '정렬 순서']
+  re_created_at timestamp [default: `now()`, note: '생성일시']
+  re_updated_at timestamp [note: '수정일시']
+}
+
+Table tb_city {
+  ci_id integer [primary key, increment, note: '시/군/구 ID']
+  ci_region_id integer [not null, note: '지역 ID (시/도, FK)']
+  ci_name varchar(50) [not null, note: '시/군/구명']
+  ci_code varchar(20) [note: '시/군/구 코드']
+  ci_order integer [default: 0, note: '정렬 순서']
+  ci_created_at timestamp [default: `now()`, note: '생성일시']
+  ci_updated_at timestamp [note: '수정일시']
+}
+
+Table tb_user_sns {
+  usn_id integer [primary key, increment, note: 'SNS 연결 ID']
+  usn_user_id integer [not null, note: '사용자 ID (FK)']
+  usn_provider varchar [not null, note: 'SNS 제공자: KAKAO, NAVER, GOOGLE 등']
+  usn_sns_id varchar [not null, note: 'SNS 고유 ID']
+  usn_access_token text [note: '액세스 토큰']
+  usn_refresh_token text [note: '리프레시 토큰']
+  usn_created_at timestamp [default: `now()`, note: '연결일시']
+  usn_updated_at timestamp [note: '수정일시']
+}
+
+Table tb_user_business {
+  usb_id integer [primary key, increment, note: '사업자 정보 ID']
+  usb_user_id integer [not null, note: '사용자 ID (FK)']
+  usb_business_type varchar [not null, note: '사업자구분: INDIVIDUAL(개인사업자), CORPORATE(법인사업자)']
+  usb_company_name varchar [note: '상호명/법인명']
+  usb_business_registration_number varchar [note: '사업자번호']
+  usb_corporate_name varchar [note: '법인명 (법인사업자용)']
+  usb_corporate_registration_number varchar [note: '법인등록번호 (법인사업자용)']
+  usb_corporate_number varchar [note: '법인번호 (법인사업자용)']
+  usb_is_primary boolean [default: false, note: '기본 사업자 정보 여부']
+  usb_is_active boolean [default: true, note: '활성화 여부']
+  usb_created_at timestamp [default: `now()`, note: '생성일시']
+  usb_updated_at timestamp [note: '수정일시']
+}
+
+// Relationships
+Ref: tb_user_role.ur_user_id > tb_user.us_id
+Ref: tb_user_role.ur_role_id > tb_role.ro_id
+Ref: tb_user.us_region_id > tb_region.re_id
+Ref: tb_user.us_city_id > tb_city.ci_id
+Ref: tb_city.ci_region_id > tb_region.re_id
+Ref: tb_user_sns.usn_user_id > tb_user.us_id
+Ref: tb_user_business.usb_user_id > tb_user.us_id
+

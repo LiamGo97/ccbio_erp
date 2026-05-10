@@ -1,0 +1,50 @@
+# compiled output
+/dist
+/node_modules
+
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+
+# Tests
+/coverage
+/.nyc_output
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Google Cloud SDK (전역 설치용; 저장소 안에 복사본 두지 않음)
+**/google-cloud-sdk/
+
+# 업로드·런타임 생성 파일 (Git에 올리지 않음)
+uploads/
+
+# Environment (비밀값은 .env / .env.* 에만 두고 Git에는 .env.example 만 올림)
+.env
+.env.local
+.env.development
+.env.production
+.env.*.local
+!.env.example
+

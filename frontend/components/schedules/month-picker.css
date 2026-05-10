@@ -1,0 +1,271 @@
+/* Select-style dropdown animation (fade + zoom + slide from top) */
+@keyframes rmp-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -8px, 0) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+/* Local copy of react-month-picker styles with invalid CSS removed for Next.js/Turbopack.
+   Original had *white-space (IE star hack) and malformed moz-user-select. */
+.month-picker {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%; }
+  .month-picker > .rmp-container {
+    position: absolute;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+    z-index: 9998;
+    top: 100%;
+    left: -10000px;
+    right: 0;
+    width: 100%;
+    margin-top: 2px;
+    transition: left 0ms cubic-bezier(0.23, 1, 0.32, 1) 450ms; }
+    @media screen and (max-width: 767px) {
+      .month-picker > .rmp-container {
+        position: fixed;
+        top: 0;
+        left: -10000px;
+        right: auto;
+        width: 100%;
+        height: 100%;
+        margin-top: 0;
+        transition: left 0ms cubic-bezier(0.23, 1, 0.32, 1) 450ms; } }
+    .month-picker > .rmp-container.rmp-table {
+      display: table; }
+    .month-picker > .rmp-container.show {
+      left: 0;
+      transition: left 0ms cubic-bezier(0.23, 1, 0.32, 1) 0ms; }
+      .month-picker > .rmp-container.show .rmp-overlay {
+        left: 0; }
+    .month-picker > .rmp-container .rmp-overlay {
+      position: fixed;
+      height: 100%;
+      width: 100%;
+      z-index: 9997;
+      top: 0;
+      left: -10000px;
+      opacity: 1;
+      -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+      will-change: opacity;
+      transform: translateZ(0);
+      transition: left 0ms cubic-bezier(0.23, 1, 0.32, 1) 0ms, opacity 400ms cubic-bezier(0.23, 1, 0.32, 1) 0ms; }
+      @media screen and (max-width: 767px) {
+        .month-picker > .rmp-container .rmp-overlay {
+          background-color: rgba(0, 0, 0, 0.25); } }
+    .month-picker > .rmp-container .rmp-cell {
+      display: table-cell;
+      vertical-align: middle;
+      box-sizing: border-box;
+      width: 100%;
+      height: 100%; }
+      @media screen and (max-width: 767px) {
+        .month-picker > .rmp-container .rmp-cell {
+          vertical-align: bottom; } }
+    .month-picker > .rmp-container .rmp-cell {
+      position: relative; }
+    .month-picker > .rmp-container .rmp-popup {
+      position: absolute;
+      -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+      transition: opacity 150ms ease-out, transform 150ms ease-out;
+      z-index: 9999;
+      font-size: 0.875rem;
+      opacity: 0;
+      border-radius: 0.375rem;
+      padding: 0.5rem;
+      box-sizing: content-box;
+      min-width: 11.5rem;
+      pointer-events: none; }
+      .month-picker > .rmp-container .rmp-popup.show {
+        pointer-events: auto; }
+      @media screen and (max-width: 767px) {
+        .month-picker > .rmp-container .rmp-popup {
+          margin: 0;
+          left: 0;
+          right: 0;
+          box-sizing: border-box;
+          bottom: 0;
+          width: 100%;
+          max-width: 100%;
+          height: 14.4rem;
+          transform: translate3d(0, 14.4rem, 0); }
+          .month-picker > .rmp-container .rmp-popup.show {
+            opacity: 1;
+            transform: translate3d(0, 0, 0); }
+          .month-picker > .rmp-container .rmp-popup.range {
+            height: 28rem;
+            transform: translate3d(0, 28rem, 0); }
+            .month-picker > .rmp-container .rmp-popup.range.show {
+              transform: translate3d(0, 0, 0); }
+            .month-picker > .rmp-container .rmp-popup.range .rmp-pad {
+              margin-top: 0.4rem; }
+              .month-picker > .rmp-container .rmp-popup.range .rmp-pad:first-of-type {
+                margin-top: 0; } }
+      @media screen and (min-width: 768px) {
+        .month-picker > .rmp-container .rmp-popup {
+          left: auto;
+          right: 0;
+          margin: 0;
+          top: 0.25rem;
+          width: 11.5rem;
+          max-width: 100%;
+          transform: translate3d(0, -8px, 0) scale(0.95); }
+          .month-picker > .rmp-container .rmp-popup.show {
+            opacity: 1;
+            animation: rmp-enter 150ms ease-out forwards; }
+          .month-picker > .rmp-container .rmp-popup.range {
+            width: 25rem;
+            padding: 0.5rem;
+            right: 0;
+            left: auto; } }
+      .month-picker > .rmp-container .rmp-popup:after {
+        content: ' ';
+        clear: both;
+        display: table; }
+      .month-picker > .rmp-container .rmp-popup .rmp-pad {
+        position: relative; }
+        @media screen and (min-width: 768px) {
+          .month-picker > .rmp-container .rmp-popup .rmp-pad {
+            box-sizing: border-box;
+            float: left;
+            width: 11.5rem; }
+            .month-picker > .rmp-container .rmp-popup .rmp-pad:nth-of-type(2) {
+              float: right; } }
+        .month-picker > .rmp-container .rmp-popup .rmp-pad > div label {
+          display: block;
+          font-size: 0.875rem;
+          text-align: center;
+          line-height: 2.25rem; }
+          .month-picker > .rmp-container .rmp-popup .rmp-pad > div label b {
+            font-weight: 500;
+            margin-right: 0.5em; }
+        .month-picker > .rmp-container .rmp-popup .rmp-pad > div i {
+          font-style: normal;
+          text-align: center;
+          width: 2.25rem;
+          height: 2.25rem;
+          line-height: 2.25rem;
+          font-size: 0.875rem;
+          position: absolute;
+          top: 0; }
+          .month-picker > .rmp-container .rmp-popup .rmp-pad > div i.prev {
+            left: 0; }
+          .month-picker > .rmp-container .rmp-popup .rmp-pad > div i.next {
+            right: 0; }
+        .month-picker > .rmp-container .rmp-popup .rmp-pad ul, .month-picker > .rmp-container .rmp-popup .rmp-pad li {
+          list-style-type: none;
+          margin: 0;
+          padding: 0; }
+        .month-picker > .rmp-container .rmp-popup .rmp-pad ul {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: center;
+          gap: 0.125rem;
+          width: 100%; }
+          .month-picker > .rmp-container .rmp-popup .rmp-pad ul:after {
+            content: none; }
+        .month-picker > .rmp-container .rmp-popup .rmp-pad li {
+          display: block;
+          float: none;
+          text-align: center;
+          font-size: 0.8125rem;
+          border-radius: 0.375rem;
+          line-height: 1.6;
+          box-sizing: border-box;
+          padding: 0.3125rem 0.5rem;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          overflow: hidden;
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+          transition: background-color 150ms ease, color 150ms ease;
+          position: relative;
+          cursor: pointer; }
+          .month-picker > .rmp-container .rmp-popup .rmp-pad li:hover {
+            background-color: var(--accent);
+            color: var(--accent-foreground); }
+          .month-picker > .rmp-container .rmp-popup .rmp-pad li.active {
+            background-color: var(--accent);
+            color: var(--accent-foreground); }
+          @media screen and (max-width: 767px) {
+            .month-picker > .rmp-container .rmp-popup .rmp-pad li {
+              flex: 0 0 calc((100% - 3 * 0.125rem) / 4); } }
+          @media screen and (min-width: 768px) {
+            .month-picker > .rmp-container .rmp-popup .rmp-pad li {
+              flex: 0 0 calc((100% - 2 * 0.125rem) / 3); } }
+          .month-picker > .rmp-container .rmp-popup .rmp-pad li.multiple {
+            background-clip: content-box; }
+          .month-picker > .rmp-container .rmp-popup .rmp-pad li.range {
+            border-radius: 1px; }
+      .month-picker > .rmp-container .rmp-popup.light {
+        color: var(--popover-foreground);
+        background-color: var(--popover);
+        border: 1px solid var(--border);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1); }
+        @media screen and (max-width: 767px) {
+          .month-picker > .rmp-container .rmp-popup.light {
+            border-top: 1px solid var(--border);
+            box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1); }
+            .month-picker > .rmp-container .rmp-popup.light.range .rmp-pad {
+              border-top: 1px solid var(--border); }
+              .month-picker > .rmp-container .rmp-popup.light.range .rmp-pad:first-of-type {
+                border-top: 0; } }
+        @media screen and (min-width: 768px) {
+          .month-picker > .rmp-container .rmp-popup.light.range .rmp-pad {
+            background-color: var(--muted); } }
+        .month-picker > .rmp-container .rmp-popup.light .rmp-pad .rmp-btn {
+          cursor: pointer;
+          -moz-user-select: none;
+          -o-user-select: none;
+          -khtml-user-select: none;
+          -webkit-user-select: none;
+          -ms-user-select: none;
+          user-select: none; }
+          @media screen and (min-width: 768px) {
+            .month-picker > .rmp-container .rmp-popup.light .rmp-pad .rmp-btn:hover {
+              background-color: var(--accent);
+              color: var(--accent-foreground); } }
+          .month-picker > .rmp-container .rmp-popup.light .rmp-pad .rmp-btn.select {
+            background-color: var(--accent); }
+        .month-picker > .rmp-container .rmp-popup.light .rmp-pad .disable, .month-picker > .rmp-container .rmp-popup.light .rmp-pad .disable:hover, .month-picker > .rmp-container .rmp-popup.light .rmp-pad li.disable, .month-picker > .rmp-container .rmp-popup.light .rmp-pad li.disable:hover {
+          background-color: transparent;
+          color: var(--muted-foreground);
+          cursor: default; }
+      .month-picker > .rmp-container .rmp-popup.dark {
+        color: #fff;
+        background-color: rgba(50, 50, 50, 0.96); }
+        @media screen and (max-width: 767px) {
+          .month-picker > .rmp-container .rmp-popup.dark.range .rmp-pad {
+            border-top: 1px solid rgba(113, 113, 113, 0.41); }
+            .month-picker > .rmp-container .rmp-popup.dark.range .rmp-pad:first-of-type {
+              border-top: 0; } }
+        @media screen and (min-width: 768px) {
+          .month-picker > .rmp-container .rmp-popup.dark.range .rmp-pad {
+            background-color: rgba(70, 70, 70, 0.9); } }
+        .month-picker > .rmp-container .rmp-popup.dark .rmp-pad .rmp-btn {
+          cursor: pointer;
+          -moz-user-select: none;
+          -o-user-select: none;
+          -khtml-user-select: none;
+          -webkit-user-select: none;
+          -ms-user-select: none;
+          user-select: none; }
+          @media screen and (min-width: 768px) {
+            .month-picker > .rmp-container .rmp-popup.dark .rmp-pad .rmp-btn:hover {
+              background-color: rgba(255, 210, 96, 0.33); } }
+          .month-picker > .rmp-container .rmp-popup.dark .rmp-pad .rmp-btn.select {
+            background-color: #262828; }
+        .month-picker > .rmp-container .rmp-popup.dark .rmp-pad li.active, .month-picker > .rmp-container .rmp-popup.dark .rmp-pad li.active:hover {
+          background-color: rgba(189, 211, 242, 0.7);
+          color: #303030; }
+        .month-picker > .rmp-container .rmp-popup.dark .rmp-pad .disable, .month-picker > .rmp-container .rmp-popup.dark .rmp-pad .disable:hover, .month-picker > .rmp-container .rmp-popup.dark .rmp-pad li.disable, .month-picker > .rmp-container .rmp-popup.dark .rmp-pad li.disable:hover {
+          background-color: transparent;
+          color: #717171;
+          cursor: default; }
