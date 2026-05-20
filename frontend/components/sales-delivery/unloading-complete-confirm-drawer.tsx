@@ -389,6 +389,20 @@ export const UnloadingCompleteConfirmDrawer: React.FC<UnloadingCompleteConfirmDr
   // 새로 추가한 행 (temp id 목록, 확정 시 백엔드에 새 행으로 전달)
   const [addedRowIds, setAddedRowIds] = React.useState<string[]>([]);
 
+  /** 배송이 바뀌거나 Drawer를 다시 열 때만 추가 행 초기화 (컨테이너 목록 로드마다 초기화하면 '컨테이너 추가'가 즉시 사라짐) */
+  const addedRowsResetKeyRef = React.useRef<string>('');
+  React.useEffect(() => {
+    if (!open || !delivery?.id) {
+      if (!open) addedRowsResetKeyRef.current = '';
+      return;
+    }
+    const key = String(delivery.id);
+    if (addedRowsResetKeyRef.current !== key) {
+      addedRowsResetKeyRef.current = key;
+      setAddedRowIds([]);
+    }
+  }, [open, delivery?.id]);
+
   // 재고 컨테이너가 있는 모든 BL 반환 + 해당 상차 행의 요청/작업 BL은 목록에 없어도 옵션에 포함
   const getAvailableBLsForItem = React.useCallback((item: any) => {
     const fromApi = Array.from(
@@ -430,12 +444,11 @@ export const UnloadingCompleteConfirmDrawer: React.FC<UnloadingCompleteConfirmDr
     const currentRowActual = norm(currentRow?.actualContainer);
     const currentRowActualId = norm(currentRow?.actualContainerId);
 
-    // 다른 상차지(현재 itemId가 아닌 loadingItem)에서 선택된 컨테이너 ID·번호 수집 (delivery.loadingItems 기준으로만 순회해 키 불일치 방지)
+    // 다른 행(상차 행 + 추가 행 new-*)에서 이미 선택된 컨테이너 제외
     const selectedIdsByOthers = new Set<string>();
     const selectedNosByOthers = new Set<string>();
-    (delivery?.loadingItems ?? []).forEach((li) => {
-      if (idStr(li.id) === idStr(itemId)) return;
-      const entry = actualApplyItems[li.id];
+    Object.entries(actualApplyItems).forEach(([rowId, entry]) => {
+      if (idStr(rowId) === idStr(itemId)) return;
       if (!entry) return;
       if (entry.actualContainerId) selectedIdsByOthers.add(idStr(entry.actualContainerId));
       if (entry.actualContainer) selectedNosByOthers.add(norm(entry.actualContainer));
@@ -450,7 +463,7 @@ export const UnloadingCompleteConfirmDrawer: React.FC<UnloadingCompleteConfirmDr
       const takenByOther = selectedIdsByOthers.has(cId) || selectedNosByOthers.has(no);
       return isCurrentSelection || !takenByOther;
     });
-  }, [containers, actualApplyItems, delivery]);
+  }, [containers, actualApplyItems]);
 
   // 초기값 설정 및 차이 감지
   React.useEffect(() => {
@@ -560,7 +573,6 @@ export const UnloadingCompleteConfirmDrawer: React.FC<UnloadingCompleteConfirmDr
       };
     });
 
-    setActualApplyItems(items);
     setConfirmError(null);
     // 이미 하차완료된 배송에서만: 실제 확정이 모두 비어 있는 항목은 이전에 "행 삭제"된 것으로 간주 → 하차 제외 상태로 표시
     // 상차완료 등 다른 상태에서는 제외 없음(기본은 모두 입력 가능)
@@ -579,7 +591,15 @@ export const UnloadingCompleteConfirmDrawer: React.FC<UnloadingCompleteConfirmDr
           )
         : new Set<string>();
     setRemovedIds(excludedIds);
-    setAddedRowIds([]);
+    setActualApplyItems((prev) => {
+      const next = { ...items };
+      for (const [k, v] of Object.entries(prev)) {
+        if (k.startsWith('new-')) {
+          next[k] = v;
+        }
+      }
+      return next;
+    });
   }, [delivery, containers]);
 
   const handleActualApplyChange = (
@@ -669,12 +689,16 @@ export const UnloadingCompleteConfirmDrawer: React.FC<UnloadingCompleteConfirmDr
     });
   };
 
-  const firstItem = delivery?.loadingItems?.find((item) => !removedIds.has(String(item.id)));
+  /** 하차 제외가 아닌 첫 행; 모두 제외면 첫 상차 행으로 BL/타입 기본값만 참고 */
+  const templateLoadingItem =
+    delivery?.loadingItems?.find((item) => !removedIds.has(String(item.id))) ?? delivery?.loadingItems?.[0];
   const handleAddRow = () => {
     const newId = `new-${Date.now()}`;
     setAddedRowIds((prev) => [...prev, newId]);
-    const defaultBL = firstItem?.workBL || firstItem?.requestBL || '';
-    const defaultType = (firstItem?.workContainerType || firstItem?.requestContainerType || 'CONTAINER') as 'CONTAINER' | 'CARGO';
+    const defaultBL = templateLoadingItem?.workBL || templateLoadingItem?.requestBL || '';
+    const defaultType = (templateLoadingItem?.workContainerType ||
+      templateLoadingItem?.requestContainerType ||
+      'CONTAINER') as 'CONTAINER' | 'CARGO';
     setActualApplyItems((prev) => ({
       ...prev,
       [newId]: {
@@ -991,9 +1015,9 @@ export const UnloadingCompleteConfirmDrawer: React.FC<UnloadingCompleteConfirmDr
                     컨테이너 추가
                   </Button>
                 </div>
-            {delivery.loadingItems && delivery.loadingItems.length > 0 ? (
+            {(delivery.loadingItems && delivery.loadingItems.length > 0) || addedRowIds.length > 0 ? (
               <>
-              {delivery.loadingItems.map((item, index) => {
+              {(delivery.loadingItems ?? []).map((item, index) => {
                 const isExcluded = removedIds.has(String(item.id));
                 // 상차지: 입고확정 시 설정한 창고 (백엔드에서 item.loadingWarehouse로 채움)
                 const warehouseName = item.loadingWarehouse?.name || getWarehouseName(item.loadingWarehouseId) || '-';
@@ -1514,8 +1538,8 @@ export const UnloadingCompleteConfirmDrawer: React.FC<UnloadingCompleteConfirmDr
                   : null;
                 const availableBales = selectedContainer?.availableBales != null ? Number(selectedContainer.availableBales) : null;
                 const availableWeight = selectedContainer?.availableWeight != null ? Number(selectedContainer.availableWeight) : null;
-                const refItem = firstItem;
-                const itemBLs = refItem ? getAvailableBLsForItem(refItem) : [];
+                const refItem = templateLoadingItem;
+                const itemBLs = refItem ? getAvailableBLsForItem(refItem) : getAvailableBLsForItem({});
                 return (
                   <div key={newId} className="border rounded-lg p-4 space-y-4 border-dashed border-blue-300 dark:border-blue-700">
                     <div className="flex items-center justify-between mb-2">

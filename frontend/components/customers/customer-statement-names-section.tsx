@@ -113,18 +113,19 @@ export function CustomerStatementNamesSection({
         await updateMutation.mutateAsync({
           statementNameId: editingId,
           data: {
-            companyName: companyName.trim() || undefined,
+            // 빈 값은 null로 보내야 PATCH 본문에 포함되어 서버가 필드를 비움(undefined는 JSON에서 생략됨)
+            companyName: companyName.trim() ? companyName.trim() : null,
             displayName: name,
-            contactPhone: contactPhone.trim() || undefined,
+            contactPhone: contactPhone.trim() ? contactPhone.trim() : null,
             isDefault,
           },
         });
         toast({ title: '수정되었습니다.' });
       } else {
         await addMutation.mutateAsync({
-          companyName: companyName.trim() || undefined,
+          companyName: companyName.trim() ? companyName.trim() : null,
           displayName: name,
-          contactPhone: contactPhone.trim() || undefined,
+          contactPhone: contactPhone.trim() ? contactPhone.trim() : null,
           isDefault: isDefault || statementNames.length === 0,
         });
         toast({ title: '발행용 이름이 추가되었습니다.' });

@@ -22,6 +22,8 @@ import { Region } from '../regions/entities/region.entity';
 import { CitiesService } from '../cities/cities.service';
 import { City } from '../cities/entities/city.entity';
 
+const CONSULTATION_REPLY_STATUS_GROUP = 'CONSULTATION_REPLY_STATUS';
+
 @Injectable()
 export class ConsultationsService {
   private readonly logger = new Logger(ConsultationsService.name);
@@ -88,6 +90,34 @@ export class ConsultationsService {
     }
     const trimmed = value.trim();
     return trimmed.length > 0 ? trimmed : null;
+  }
+
+  /** tb_code CONSULTATION_REPLY_STATUS — cd_value 또는 cd_name(표시명)으로 입력 허용, 저장은 cd_value */
+  private async normalizeReplyStatusInput(raw?: string | null): Promise<string | null> {
+    const v = this.sanitize(typeof raw === 'string' ? raw : raw != null ? String(raw) : null);
+    if (!v) {
+      return null;
+    }
+    const codes = await this.codesService.findByCategory(CONSULTATION_REPLY_STATUS_GROUP);
+    for (const c of codes) {
+      const val = (c.value ?? '').trim();
+      const name = (c.name ?? '').trim();
+      if (val && v === val) {
+        return val;
+      }
+      if (name && v === name && val) {
+        return val;
+      }
+    }
+    throw new BadRequestException('유효하지 않은 답변 진행상태입니다.');
+  }
+
+  private parseReplyAssigneeId(raw?: number | null): number | null {
+    if (raw === undefined || raw === null) {
+      return null;
+    }
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
   }
 
   private parseDate(value?: string | null): Date | null {
@@ -254,6 +284,7 @@ export class ConsultationsService {
     };
     const customer = consultation.customer;
     const manager = consultation.manager;
+    const replyAssignee = consultation.replyAssignee;
 
     // deliveryRegion과 deliveryCity FK에서 이름으로 변환
     const deliveryRegion = consultation.deliveryRegionEntity
@@ -314,6 +345,9 @@ export class ConsultationsService {
       notes: consultation.notes ?? null,
       managerId: manager?.id ?? null,
       managerName: manager?.name ?? null,
+      replyStatus: consultation.replyStatus ?? null,
+      replyAssigneeId: replyAssignee?.id ?? null,
+      replyAssigneeName: replyAssignee?.name ?? null,
       mainProduct: consultation.mainProduct ?? null,
       arrivalPrice: consultation.arrivalPrice ?? null,
       products: consultation.products
@@ -398,6 +432,10 @@ export class ConsultationsService {
         qb.andWhere('consultation.co_source = :source', { source: query.source });
       }
 
+      if (query.replyStatus) {
+        qb.andWhere('consultation.co_reply_status = :replyStatus', { replyStatus: query.replyStatus });
+      }
+
       if (query.managerId) {
         qb.andWhere('consultation.us_id = :managerId', { managerId: query.managerId });
       }
@@ -472,7 +510,18 @@ export class ConsultationsService {
     // 4) 실제 엔티티 로드 (관계 포함)
     const items = await this.consultationRepository.find({
       where: { id: In(ids) },
-      relations: ['customer', 'customer.regionEntity', 'customer.cityEntity', 'customer.operations', 'manager', 'deliveryRegionEntity', 'deliveryCityEntity', 'products', 'products.productCategory'],
+      relations: [
+        'customer',
+        'customer.regionEntity',
+        'customer.cityEntity',
+        'customer.operations',
+        'manager',
+        'replyAssignee',
+        'deliveryRegionEntity',
+        'deliveryCityEntity',
+        'products',
+        'products.productCategory',
+      ],
     });
 
     // 5) 정렬 일치 보장 (조회한 ID 순서를 그대로 유지)
@@ -502,6 +551,7 @@ export class ConsultationsService {
         'customer.cityEntity',
         'customer.operations',
         'manager',
+        'replyAssignee',
         'deliveryRegionEntity',
         'deliveryCityEntity',
         'products',
@@ -531,7 +581,16 @@ export class ConsultationsService {
 
     const consultations = await this.consultationRepository.find({
       where: { customer: { id: customer.id } },
-      relations: ['customer', 'customer.regionEntity', 'customer.cityEntity', 'customer.operations', 'manager', 'products', 'products.productCategory'],
+      relations: [
+        'customer',
+        'customer.regionEntity',
+        'customer.cityEntity',
+        'customer.operations',
+        'manager',
+        'replyAssignee',
+        'products',
+        'products.productCategory',
+      ],
       order: { consultationDate: 'DESC', createdAt: 'DESC' },
       take: 20,
     });
@@ -726,9 +785,14 @@ export class ConsultationsService {
     const requestedVehicleValue =
       dto.requestedWeight !== undefined ? this.sanitize(dto.requestedWeight) : firstRequestedVehicle;
 
+    const replyStatus = await this.normalizeReplyStatusInput(dto.replyStatus ?? null);
+    const replyAssigneeId = this.parseReplyAssigneeId(dto.replyAssigneeId ?? null);
+
     const consultation = this.consultationRepository.create({
       customer,
       manager: dto.managerId ? ({ id: dto.managerId } as User) : undefined,
+      replyStatus,
+      replyAssignee: replyAssigneeId ? ({ id: replyAssigneeId } as User) : null,
       consultationDate,
       type: this.sanitize(dto.type),
       source: this.sanitize(dto.source),
@@ -804,6 +868,14 @@ export class ConsultationsService {
 
     if (dto.managerId !== undefined) {
       consultation.manager = dto.managerId ? ({ id: dto.managerId } as User) : null;
+    }
+
+    if (dto.replyStatus !== undefined) {
+      consultation.replyStatus = await this.normalizeReplyStatusInput(dto.replyStatus ?? null);
+    }
+    if (dto.replyAssigneeId !== undefined) {
+      const rid = this.parseReplyAssigneeId(dto.replyAssigneeId);
+      consultation.replyAssignee = rid ? ({ id: rid } as User) : null;
     }
 
     const consultationDate =

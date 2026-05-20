@@ -104,6 +104,8 @@ export interface SalesDelivery {
     unloadingAddressJibun?: string | null;
     unloadingLegalBCode?: string | null;
     unloadingAddressDefaultType?: string | null;
+    /** 판매 등록/수정 시 입력한 비고 (tb_sales.sa_notes) */
+    notes?: string | null;
     customer?: {
       id: string;
       companyName?: string | null;
@@ -303,6 +305,128 @@ interface UseSalesDeliveriesParams {
   enabled?: boolean; // 쿼리 활성화 여부
 }
 
+function buildDeliveriesListApiParams(
+  queryParams: Omit<UseSalesDeliveriesParams, 'enabled'>,
+): Record<string, unknown> {
+  const params: Record<string, unknown> = { ...queryParams };
+  if (params.statuses && Array.isArray(params.statuses) && params.statuses.length > 0) {
+    params.status = params.statuses;
+    delete params.statuses;
+  }
+  if (params.dispatchCompanyIds !== undefined) {
+    if (params.dispatchCompanyIds === '__none__') {
+      params.dispatchCompanyId = '__none__';
+    } else if (Array.isArray(params.dispatchCompanyIds) && params.dispatchCompanyIds.length > 0) {
+      params.dispatchCompanyId = params.dispatchCompanyIds;
+    }
+    delete params.dispatchCompanyIds;
+  }
+  if (params.loadingWarehouseIds !== undefined) {
+    if (params.loadingWarehouseIds === '__none__') {
+      params.loadingWarehouseId = '__none__';
+    } else if (Array.isArray(params.loadingWarehouseIds) && params.loadingWarehouseIds.length > 0) {
+      params.loadingWarehouseId = params.loadingWarehouseIds;
+    }
+    delete params.loadingWarehouseIds;
+  }
+  return params;
+}
+
+export type UseSalesDeliveriesAllParams = Omit<UseSalesDeliveriesParams, 'page' | 'limit'>;
+
+const DELIVERIES_ALL_PAGE_SIZE = 200;
+
+/** 페이지를 순회하며 운송 목록 전체를 조회 (기사별 운송 등) */
+/** 기사별 운송 API 응답 — 경량 요약 */
+export interface DriverDeliverySummary {
+  id: string;
+  orderNumber?: string | null;
+  vehicleNumber?: string | null;
+  driverName?: string | null;
+  driverContact?: string | null;
+  transportFee?: number | null;
+  status?: string | null;
+  /** 상차 항목 기준 — CARGO,CONTAINER 등 (혼합 시 콤마 구분) */
+  loadingContainerTypes?: string | null;
+  unloadingAddressDetail?: string | null;
+  sales?: {
+    unloadingAddressRoad?: string | null;
+    unloadingAddressJibun?: string | null;
+    unloadingAddress?: string | null;
+    unloadingAddressDetail?: string | null;
+  } | null;
+}
+
+export interface DriverDeliveryGroup {
+  key: string;
+  vehicleNumber: string;
+  driverName: string;
+  driverContact: string;
+  label: string;
+  deliveryCount: number;
+  transportFeeSum: number;
+  deliveries: DriverDeliverySummary[];
+}
+
+export interface DriverDeliveryGroupsResponse {
+  groups: DriverDeliveryGroup[];
+  totalDeliveries: number;
+  totalDrivers: number;
+}
+
+export function useSalesDeliveriesByDriver(search?: string) {
+  const searchKey = search?.trim() || '';
+  return useQuery<DriverDeliveryGroupsResponse, Error>({
+    queryKey: ['deliveries', 'by-driver', searchKey],
+    queryFn: async () => {
+      const response = await api.get<DriverDeliveryGroupsResponse>('/deliveries/by-driver', {
+        params: searchKey ? { search: searchKey } : undefined,
+      });
+      return response.data;
+    },
+    placeholderData: (previousData) => previousData,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useSalesDeliveriesAll(params?: UseSalesDeliveriesAllParams) {
+  const { enabled, ...queryParams } = params || {};
+
+  return useQuery<SalesDeliveriesResponse, Error>({
+    queryKey: ['sales-deliveries', 'all', queryParams],
+    queryFn: async () => {
+      const baseParams = buildDeliveriesListApiParams(queryParams);
+      const all: SalesDelivery[] = [];
+      let page = 1;
+      let lastPage = 1;
+
+      do {
+        const response = await api.get<SalesDeliveriesResponse>('/deliveries', {
+          params: {
+            ...baseParams,
+            page,
+            limit: DELIVERIES_ALL_PAGE_SIZE,
+          },
+        });
+        const body = response.data;
+        all.push(...(body.data ?? []));
+        lastPage = body.lastPage && body.lastPage > 0 ? body.lastPage : 1;
+        page += 1;
+      } while (page <= lastPage);
+
+      return {
+        data: all,
+        total: all.length,
+        page: 1,
+        lastPage: 1,
+      };
+    },
+    enabled: enabled !== false,
+    placeholderData: (previousData) => previousData,
+    refetchOnWindowFocus: true,
+  });
+}
+
 export function useSalesDeliveries(params?: UseSalesDeliveriesParams, options?: { refetchInterval?: number }) {
   const { enabled, ...queryParams } = params || {};
   
@@ -310,29 +434,7 @@ export function useSalesDeliveries(params?: UseSalesDeliveriesParams, options?: 
     queryKey: ['sales-deliveries', queryParams],
     queryFn: async () => {
       try {
-        const params: Record<string, unknown> = { ...queryParams };
-        if (params.statuses && Array.isArray(params.statuses) && params.statuses.length > 0) {
-          params.status = params.statuses;
-          delete params.statuses;
-        }
-        // dispatchCompanyIds → dispatchCompanyId
-        if (params.dispatchCompanyIds !== undefined) {
-          if (params.dispatchCompanyIds === '__none__') {
-            params.dispatchCompanyId = '__none__';
-          } else if (Array.isArray(params.dispatchCompanyIds) && params.dispatchCompanyIds.length > 0) {
-            params.dispatchCompanyId = params.dispatchCompanyIds;
-          }
-          delete params.dispatchCompanyIds;
-        }
-        // loadingWarehouseIds → loadingWarehouseId
-        if (params.loadingWarehouseIds !== undefined) {
-          if (params.loadingWarehouseIds === '__none__') {
-            params.loadingWarehouseId = '__none__';
-          } else if (Array.isArray(params.loadingWarehouseIds) && params.loadingWarehouseIds.length > 0) {
-            params.loadingWarehouseId = params.loadingWarehouseIds;
-          }
-          delete params.loadingWarehouseIds;
-        }
+        const params = buildDeliveriesListApiParams(queryParams);
         const response = await api.get('/deliveries', { params });
         return response.data;
       } catch (error: any) {
@@ -382,6 +484,7 @@ export function useUpdateSalesDelivery() {
     },
     onSuccess: (updatedDelivery, { id }) => {
       void queryClient.invalidateQueries({ queryKey: ['sales-deliveries'] });
+      void queryClient.invalidateQueries({ queryKey: ['deliveries', 'by-driver'] });
       void queryClient.invalidateQueries({ queryKey: ['sales-delivery', id] });
       if (updatedDelivery?.salesId) {
         void queryClient.invalidateQueries({ queryKey: ['sales', 'detail', updatedDelivery.salesId] });

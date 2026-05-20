@@ -26,6 +26,11 @@ export class GetConsultationsDto {
   @IsString()
   source?: string;
 
+  /** tb_code CONSULTATION_REPLY_STATUS cd_value */
+  @IsOptional()
+  @IsString()
+  replyStatus?: string;
+
   @IsOptional()
   @IsInt()
   @Type(() => Number)

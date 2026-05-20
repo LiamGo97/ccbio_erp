@@ -40,6 +40,7 @@ import { UnloadingCompleteConfirmDrawer } from './unloading-complete-confirm-dra
 import { DispatchCompanyDeliveryEditDrawer } from './dispatch-company-delivery-edit-drawer';
 import { LoadingCompanyDeliveryEditDrawer } from './loading-company-delivery-edit-drawer';
 import { SalesDeliveryStatusAuditSection } from './sales-delivery-status-audit-section';
+import { SalesDeliverySalesNotesSection } from './sales-delivery-sales-notes-section';
 import { Truck, Warehouse } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -567,7 +568,7 @@ export const SalesDeliveryDetailDrawer: React.FC<SalesDeliveryDetailDrawerProps>
                     </div>
                   </div>
                 </section>
-                <Separator />
+                <SalesDeliverySalesNotesSection notes={data.sales.notes} withSeparator />
               </>
             )}
 
@@ -1201,11 +1202,11 @@ export const SalesDeliveryDetailDrawer: React.FC<SalesDeliveryDetailDrawerProps>
               </>
             )}
 
-            {/* 비고 */}
+            {/* 운송 비고 */}
             {data.notes && (
               <>
                 <section className="space-y-2.5">
-                  <h3 className="text-sm font-semibold text-foreground">비고</h3>
+                  <h3 className="text-sm font-semibold text-foreground">운송 비고</h3>
                   <div className="flex flex-col gap-1">
                     <span className="text-sm font-medium whitespace-pre-wrap">{data.notes}</span>
                   </div>

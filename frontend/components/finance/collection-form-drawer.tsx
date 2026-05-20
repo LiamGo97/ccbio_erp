@@ -30,7 +30,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { DatePicker } from '@/components/schedules/date-picker';
-import { Loader2, X, Phone, Building2, Search, Trash2, Save, CirclePlus } from 'lucide-react';
+import { Loader2, X, Phone, Building2, Search, Trash2, Save, CirclePlus, Send } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { CollectionListItem, useCollectByCustomer, useUpdateCollection, useDeleteCollection } from '@/lib/hooks/use-collections';
 import { useCustomerLedger } from '@/lib/hooks/use-customer-ledger';
@@ -47,6 +47,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import api from '@/lib/api';
+import { CollectionSmsDialog } from '@/components/finance/collection-sms-drawer';
 
 interface CollectionFormDrawerProps {
   open: boolean;
@@ -119,6 +120,7 @@ export function CollectionFormDrawer({
   const [phoneSearchLoading, setPhoneSearchLoading] = React.useState(false);
   const [phoneSearchError, setPhoneSearchError] = React.useState<string | null>(null);
   const [phoneSearchAttempted, setPhoneSearchAttempted] = React.useState(false);
+  const [smsPreviewOpen, setSmsPreviewOpen] = React.useState(false);
 
   const {
     register,
@@ -422,9 +424,9 @@ export function CollectionFormDrawer({
           notes: collection.notes || '',
         });
         setAmountDisplayValue(formatAmountInput(String(collection.collectionAmount)));
-        setCompanyName(collection.customerName || '');
-        setPhone('');
-        setCeo('');
+        setCompanyName(collection.companyName ?? collection.customerName ?? '');
+        setCeo(collection.ceo ?? '');
+        setPhone(collection.phone ? formatPhone(collection.phone) : '');
       } else {
         // 입력 모드
         reset({
@@ -593,9 +595,18 @@ export function CollectionFormDrawer({
   }, []);
 
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setSmsPreviewOpen(false);
+      return;
+    }
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (smsPreviewOpen) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        setSmsPreviewOpen(false);
+        return;
+      }
       if (deleteDialogOpen) {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -623,6 +634,7 @@ export function CollectionFormDrawer({
   }, [
     open,
     onOpenChange,
+    smsPreviewOpen,
     deleteDialogOpen,
     companySearchOpen,
     phoneSearchOpen,
@@ -899,7 +911,7 @@ export function CollectionFormDrawer({
             </div>
 
             <DrawerFooter className="shrink-0 border-t">
-              <div className="flex items-center justify-end gap-2 w-full">
+              <div className="flex flex-wrap items-center justify-end gap-2 w-full">
                 {/* 취소 → 삭제(수정 모드일 때만) → 등록/수정 */}
                 <Button
                   type="button"
@@ -910,6 +922,18 @@ export function CollectionFormDrawer({
                   <X className="mr-1.5 h-4 w-4" />
                   취소
                 </Button>
+                {isEditMode && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setSmsPreviewOpen(true)}
+                    disabled={isSubmitting || !selectedCustomerId}
+                    title={!selectedCustomerId ? '고객을 먼저 선택해주세요.' : undefined}
+                  >
+                    <Send className="mr-1.5 h-4 w-4" />
+                    미리보기 후 SMS 발송
+                  </Button>
+                )}
                 {isEditMode && (
                   <Button
                     type="button"
@@ -936,6 +960,38 @@ export function CollectionFormDrawer({
           </form>
         </DrawerContent>
       </Drawer>
+
+      <CollectionSmsDialog
+        open={smsPreviewOpen}
+        onOpenChange={setSmsPreviewOpen}
+        context={
+          smsPreviewOpen
+            ? (() => {
+                const sid = watch('supplierId');
+                let supplierId: number | null | undefined;
+                if (!sid || sid === 'none') supplierId = undefined;
+                else if (sid === '0') supplierId = null;
+                else {
+                  const n = Number(sid);
+                  supplierId = Number.isFinite(n) ? n : undefined;
+                }
+                return {
+                  collectionId: collection?.id ?? null,
+                  recipientPhone: phone,
+                  companyName,
+                  ceo,
+                  collectionAmount: watch('collectionAmount'),
+                  collectionDate: watch('collectionDate'),
+                  collectionMethod: watch('collectionMethod') || null,
+                  isPrepayment: watch('isPrepayment'),
+                  notes: watch('notes') || null,
+                  currentBalance: ledger?.currentBalance ?? null,
+                  supplierId,
+                };
+              })()
+            : null
+        }
+      />
 
       {/* 삭제 확인 다이얼로그 */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

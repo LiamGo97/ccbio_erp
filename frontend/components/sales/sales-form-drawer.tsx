@@ -71,6 +71,11 @@ import {
 } from '@/lib/hooks/use-customers';
 import { CustomerDeliveryAddressFormDialog } from '@/components/customers/customer-delivery-address-form-dialog';
 import { formatCustomerListDefaultAddress, resolveDefaultAddressKind } from '@/lib/customer-default-address-kind';
+import {
+  BlPackingSelectionTable,
+  groupContainersByBlPacking,
+  type SalesBlPackingSelectRow,
+} from '@/components/sales/sales-bl-packing-selection-table';
 
 interface CompanySearchResult {
   id: string;
@@ -98,6 +103,35 @@ const formatDate = (value?: string | null) => {
     day: '2-digit',
   });
 };
+
+/** BL·패킹 카드에서 입력한 카고 수량을 컨테이너별 가용량 비율로 배분 */
+function distributeBlPackingCargo(
+  containers: SelectedContainer[],
+  totalCargoBales: number,
+  totalCargoWeightTon: number,
+): Map<string, { cargoBales: number; cargoWeight: number }> {
+  const result = new Map<string, { cargoBales: number; cargoWeight: number }>();
+  const availBales = containers.map(
+    (c) => Number(c.availableBales ?? c.salesBales ?? c.tradeBales ?? 0) || 0,
+  );
+  const availWeight = containers.map(
+    (c) => Number(c.availableWeight ?? c.weight ?? 0) || 0,
+  );
+  const sumBales = availBales.reduce((a, b) => a + b, 0);
+  const sumWeight = availWeight.reduce((a, b) => a + b, 0);
+  containers.forEach((c, i) => {
+    const balesShare =
+      sumBales > 0
+        ? (availBales[i] / sumBales) * totalCargoBales
+        : totalCargoBales / containers.length;
+    const weightShare =
+      sumWeight > 0
+        ? (availWeight[i] / sumWeight) * totalCargoWeightTon
+        : totalCargoWeightTon / containers.length;
+    result.set(c.id, { cargoBales: balesShare, cargoWeight: weightShare });
+  });
+  return result;
+}
 
 const formatNumber = (value: number | null | undefined, decimals: number = 2) => {
   if (value === null || value === undefined) return '-';
@@ -160,6 +194,7 @@ function ContainerSelectionTable({
   sortBy,
   sortOrder,
   onSortChange,
+  productLineKey = 'container',
 }: {
   containers: SelectedContainer[];
   gradeCodes: Array<{ value: string; name: string }>;
@@ -185,7 +220,9 @@ function ContainerSelectionTable({
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
   onSortChange?: (sortBy: string, sortOrder: 'asc' | 'desc') => void;
+  productLineKey?: 'container' | 'bl';
 }) {
+  const useBlProductLine = productLineKey === 'bl';
   // 수량 표시 헬퍼 함수 (입고 예정 재고 페이지와 동일한 형식)
   const formatQuantity = React.useCallback((available: number | null, total: number | null, sold: number | null, isInteger: boolean = false) => {
     if (available == null || total == null) return { text: '-', hasSales: false };
@@ -381,22 +418,22 @@ function ContainerSelectionTable({
         },
         size: 150,
       },
-      {
-        accessorKey: 'containerNo',
-        header: '컨테이너 번호',
-        cell: ({ row }) => {
-          const containerNo = row.original.containerNo;
-          const sequence = row.original.sequence;
-          
-          // 순번이 있으면 컨테이너 번호와 함께 표시
-          const displayText = sequence != null
-            ? `${containerNo} [${sequence}]`
-            : containerNo;
-          
-          return <span className="font-medium">{displayText}</span>;
-        },
-        size: 150,
-      },
+      ...(useBlProductLine
+        ? []
+        : [
+            {
+              accessorKey: 'containerNo',
+              header: '컨테이너 번호',
+              cell: ({ row }: { row: { original: SelectedContainer } }) => {
+                const containerNo = row.original.containerNo;
+                const sequence = row.original.sequence;
+                const displayText =
+                  sequence != null ? `${containerNo} [${sequence}]` : containerNo;
+                return <span className="font-medium">{displayText}</span>;
+              },
+              size: 150,
+            } as ColumnDef<SelectedContainer>,
+          ]),
       {
         accessorKey: 'etaDate',
         header: 'ETA',
@@ -521,7 +558,7 @@ function ContainerSelectionTable({
         size: 150,
       },
     ],
-    [gradeCodes, salesGradeCodes, formatQuantity],
+    [gradeCodes, salesGradeCodes, formatQuantity, useBlProductLine],
   );
 
   return (
@@ -642,6 +679,8 @@ interface SelectedContainer {
   contractNo: string | null;
   bk?: string | null; // BK 번호
   bl?: string | null; // BL 번호
+  packingType?: string | null;
+  packingName?: string | null;
   sequence: number | null;
   orderCount?: number;
   productName: string | null;
@@ -735,6 +774,8 @@ interface SalesFormData {
   registerAs?: 'RESERVED' | 'SALE';
   /** 하차지로 고객 배송지를 고른 경우 API에 전달 → 해당 배송지 행 갱신 */
   unloadingDeliveryAddressId?: string | null;
+  /** 판매 비고 (운송관리에서도 표시 예정, API 연동 전 UI) */
+  notes?: string | null;
 }
 
 function resolveSalesCustomerDefaultLine(data: {
@@ -1324,6 +1365,8 @@ interface SalesFormDrawerProps {
   onSubmit?: (data: SalesFormData) => Promise<void>;
   isSubmitting?: boolean;
   initialData?: Partial<SalesFormData>; // 복사하여 등록 시 초기값
+  /** 신규 판매관리만 'bl'. 기본 container = 기존 /sales 동작 */
+  productLineKey?: 'container' | 'bl';
 }
 
 const defaultValues: SalesFormData = {
@@ -1357,6 +1400,7 @@ const defaultValues: SalesFormData = {
   requestVehicle: null,
   transportFee: null,
   unloadingDeliveryAddressId: null,
+  notes: '',
 };
 
 export function SalesFormDrawer({
@@ -1367,7 +1411,9 @@ export function SalesFormDrawer({
   onSubmit,
   isSubmitting: externalIsSubmitting,
   initialData,
+  productLineKey = 'container',
 }: SalesFormDrawerProps) {
+  const useBlProductLine = productLineKey === 'bl';
   const isMobile = useIsMobile();
   const [isClient, setIsClient] = React.useState(false);
   const [customerAddressModalOpen, setCustomerAddressModalOpen] = React.useState(false);
@@ -1632,6 +1678,7 @@ export function SalesFormDrawer({
         transportFee: salesDetail.transportFee ?? null,
         advancePaymentRatio: salesDetail.advancePaymentRatio ?? null,
         advancePaymentAmount: salesDetail.advancePaymentAmount ?? null,
+        notes: salesDetail.notes?.trim() ?? '',
       };
       // API가 고객·판매 하차지 중 한쪽에만 법정동을 내려줄 때 코어 비교가 어긋나 '이 판매 저장 주소'로만 잡히는 것 방지
       {
@@ -2013,6 +2060,11 @@ export function SalesFormDrawer({
       return `${c.id}:${weight}`;
     }).join('|');
   }, [selectedContainersValue]);
+
+  const selectedBlPackingGroups = React.useMemo(() => {
+    if (!useBlProductLine) return [];
+    return groupContainersByBlPacking(selectedContainersValue);
+  }, [selectedContainersValue, useBlProductLine]);
   
   React.useEffect(() => {
     // 이미 재계산 중이면 실행하지 않음 (무한 루프 방지)
@@ -2177,6 +2229,7 @@ export function SalesFormDrawer({
   const [bkBlSearch, setBkBlSearch] = React.useState<string>('');
   const [containers, setContainers] = React.useState<SelectedContainer[]>([]);
   const [allContainers, setAllContainers] = React.useState<SelectedContainer[]>([]); // 전체 컨테이너 목록 (페이지네이션 전)
+  const [blPackingRows, setBlPackingRows] = React.useState<SalesBlPackingSelectRow[]>([]);
   const [containersLoading, setContainersLoading] = React.useState(false);
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
   const [containerPage, setContainerPage] = React.useState(1);
@@ -3206,10 +3259,15 @@ export function SalesFormDrawer({
     setBkBlSearch('');
     setContainers([]);
     setAllContainers([]);
+    setBlPackingRows([]);
     setRowSelection({});
     setContainerPage(1);
+    if (productLineKey === 'bl') {
+      setContainerSortBy('bl');
+      setContainerSortOrder('asc');
+    }
     void fetchContainers(true); // 초기 로드 시에는 로딩 표시
-  }, []);
+  }, [productLineKey]);
 
   const handleProductSelectDrawerClose = React.useCallback(() => {
     setProductSelectDrawerOpen(false);
@@ -3218,6 +3276,7 @@ export function SalesFormDrawer({
     setBkBlSearch('');
     setContainers([]);
     setAllContainers([]);
+    setBlPackingRows([]);
     setRowSelection({});
   }, []);
 
@@ -3268,6 +3327,8 @@ export function SalesFormDrawer({
         contractNo: c.contractNo ?? null,
         bk: c.bk ?? c.bookingNo ?? null, // BK 번호 추가
         bl: c.bl ?? null, // BL 번호 추가
+        packingType: c.packingType ?? null,
+        packingName: c.packingName ?? c.packing ?? null,
         sequence: c.sequence ?? null,
         containerType: (c.containerType ?? 'CONTAINER') as 'CONTAINER' | 'CARGO', // 추가 시 기본: 전체 컨테이너
         orderCount: c.orderCount ?? 1,
@@ -3425,23 +3486,123 @@ export function SalesFormDrawer({
     });
   }, [allContainers, containerSortBy, containerSortOrder]);
 
+  const allBlPackingRows = React.useMemo(() => {
+    if (!useBlProductLine) return [];
+    return groupContainersByBlPacking(allContainers);
+  }, [allContainers, useBlProductLine]);
+
+  const sortedAllBlPackingRows = React.useMemo(() => {
+    if (!useBlProductLine || allBlPackingRows.length === 0) return [];
+    const key = containerSortBy;
+    const asc = containerSortOrder === 'asc';
+    return [...allBlPackingRows].sort((a, b) => {
+      let aVal: string | number | null | undefined;
+      let bVal: string | number | null | undefined;
+      switch (key) {
+        case 'bl':
+          aVal = a.bl ?? '';
+          bVal = b.bl ?? '';
+          break;
+        case 'packingName':
+          aVal = a.packingName ?? a.packingType ?? '';
+          bVal = b.packingName ?? b.packingType ?? '';
+          break;
+        case 'productName':
+          aVal = a.productName ?? '';
+          bVal = b.productName ?? '';
+          break;
+        case 'inboundStatus':
+          aVal = a.inboundStatus ?? '';
+          bVal = b.inboundStatus ?? '';
+          break;
+        case 'inventoryStatus':
+          aVal = a.inventoryStatus ?? '';
+          bVal = b.inventoryStatus ?? '';
+          break;
+        case 'containerCount':
+          return asc ? a.containerCount - b.containerCount : b.containerCount - a.containerCount;
+        case 'availableBales':
+          return asc ? a.availableBales - b.availableBales : b.availableBales - a.availableBales;
+        case 'availableKg':
+          return asc ? a.availableKg - b.availableKg : b.availableKg - a.availableKg;
+        case 'etaDate':
+          aVal = a.etaDate ? new Date(a.etaDate).getTime() : 0;
+          bVal = b.etaDate ? new Date(b.etaDate).getTime() : 0;
+          return asc ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
+        case 'warehouseName':
+          aVal = a.warehouseName ?? '';
+          bVal = b.warehouseName ?? '';
+          break;
+        case 'exportCountryName':
+          aVal = a.exportCountryName ?? '';
+          bVal = b.exportCountryName ?? '';
+          break;
+        case 'exporterName':
+          aVal = a.exporterName ?? '';
+          bVal = b.exporterName ?? '';
+          break;
+        case 'bk':
+          aVal = a.bk ?? '';
+          bVal = b.bk ?? '';
+          break;
+        default: {
+          const aRaw = (a as unknown as Record<string, unknown>)[key];
+          const bRaw = (b as unknown as Record<string, unknown>)[key];
+          aVal = aRaw === null || aRaw === undefined ? '' : String(aRaw);
+          bVal = bRaw === null || bRaw === undefined ? '' : String(bRaw);
+        }
+      }
+      const aStr = String(aVal ?? '');
+      const bStr = String(bVal ?? '');
+      const cmp = aStr.localeCompare(bStr, 'ko');
+      return asc ? cmp : -cmp;
+    });
+  }, [allBlPackingRows, containerSortBy, containerSortOrder, useBlProductLine]);
+
   // 페이지 또는 페이지 크기 변경 시 페이지네이션된 데이터 업데이트
   React.useEffect(() => {
+    if (useBlProductLine) {
+      if (sortedAllBlPackingRows.length > 0) {
+        const start = (containerPage - 1) * containerPageSize;
+        const end = start + containerPageSize;
+        setBlPackingRows(sortedAllBlPackingRows.slice(start, end));
+      } else {
+        setBlPackingRows([]);
+      }
+      return;
+    }
     if (sortedAllContainers.length > 0) {
       const start = (containerPage - 1) * containerPageSize;
       const end = start + containerPageSize;
       const paginatedContainers = sortedAllContainers.slice(start, end);
       setContainers(paginatedContainers);
     } else {
-      // allContainers가 빈 배열일 때도 containers를 빈 배열로 설정
       setContainers([]);
     }
-  }, [sortedAllContainers, containerPage, containerPageSize]);
+  }, [useBlProductLine, sortedAllBlPackingRows, sortedAllContainers, containerPage, containerPageSize]);
 
   // 선택 확인
   const handleConfirmSelection = React.useCallback(() => {
-    const selectedIds = Object.keys(rowSelection).filter((key) => rowSelection[key]);
-    const selected = containers.filter((c) => selectedIds.includes(c.id));
+    const selectedKeys = Object.keys(rowSelection).filter((key) => rowSelection[key]);
+    let selected: SelectedContainer[];
+    if (useBlProductLine) {
+      const rowMap = new Map(allBlPackingRows.map((r) => [r.rowKey, r]));
+      const containerIds = new Set<string>();
+      selected = [];
+      selectedKeys.forEach((key) => {
+        const row = rowMap.get(key);
+        if (!row) return;
+        row.containers.forEach((c) => {
+          const full = allContainers.find((ac) => ac.id === c.id);
+          if (full && !containerIds.has(full.id)) {
+            containerIds.add(full.id);
+            selected.push(full);
+          }
+        });
+      });
+    } else {
+      selected = containers.filter((c) => selectedKeys.includes(c.id));
+    }
     const current = watch('selectedContainers') || [];
     const merged = [...current];
     
@@ -3492,9 +3653,21 @@ export function SalesFormDrawer({
     
     toast({
       title: '추가 완료',
-      description: `${selected.length}개의 컨테이너가 추가되었습니다.`,
+      description: useBlProductLine
+        ? `${selectedKeys.length}개 BL·패킹(${selected.length}개 컨테이너)이 추가되었습니다.`
+        : `${selected.length}개의 컨테이너가 추가되었습니다.`,
     });
-  }, [containers, rowSelection, watch, setValue, handleProductSelectDrawerClose, toast]);
+  }, [
+    containers,
+    allContainers,
+    allBlPackingRows,
+    rowSelection,
+    useBlProductLine,
+    watch,
+    setValue,
+    handleProductSelectDrawerClose,
+    toast,
+  ]);
 
   // 상품 선택 패널 공통 콘텐츠 (데스크톱 패널 / 모바일 drawer 모두 사용)
   const renderProductSelectContent = () => (
@@ -3504,7 +3677,9 @@ export function SalesFormDrawer({
           <div className="space-y-1">
             <h2 className="text-lg font-semibold">상품 선택</h2>
             <p className="text-sm text-muted-foreground">
-              상품을 선택하면 해당 상품의 컨테이너 목록이 표시됩니다. 판매할 컨테이너를 선택하세요.
+              {useBlProductLine
+                ? 'BL·패킹 단위로 목록이 표시됩니다. 패킹이 다르면 별도 행으로 나옵니다. 판매할 항목을 선택하세요.'
+                : '상품을 선택하면 해당 상품의 컨테이너 목록이 표시됩니다. 판매할 컨테이너를 선택하세요.'}
             </p>
           </div>
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleProductSelectDrawerClose}>
@@ -3518,8 +3693,55 @@ export function SalesFormDrawer({
           {containersLoading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-              <span className="ml-2 text-sm text-muted-foreground">컨테이너 목록 조회 중...</span>
+              <span className="ml-2 text-sm text-muted-foreground">
+                {useBlProductLine ? 'BL·패킹 목록 조회 중...' : '컨테이너 목록 조회 중...'}
+              </span>
             </div>
+          ) : useBlProductLine ? (
+            <BlPackingSelectionTable
+              rows={blPackingRows}
+              salesGradeCodes={(salesGradeCodes || [])
+                .filter((c) => c.value && c.name)
+                .map((c) => ({ value: c.value!, name: c.name! }))}
+              rowSelection={rowSelection}
+              onRowSelectionChange={setRowSelection}
+              selectedInboundStatus={selectedInboundStatus || '__all__'}
+              onInboundStatusChange={(value) => {
+                setSelectedInboundStatus(
+                  value as 'INBOUND_PENDING' | 'INBOUND_SCHEDULED' | 'INBOUND_CONFIRMED' | '__all__' | '',
+                );
+              }}
+              selectedInventoryStatus={selectedInventoryStatus || '__all__'}
+              onInventoryStatusChange={setSelectedInventoryStatus}
+              selectedProduct={selectedProductForSearch || ''}
+              onProductChange={(value) => {
+                setSelectedProductForSearch(value === '__all__' ? '' : value);
+              }}
+              products={(products || []).map((p) => ({
+                id: String(p.id),
+                value: p.value ?? null,
+                name: p.name ?? null,
+              }))}
+              bkBlSearch={bkBlSearch}
+              setBkBlSearch={setBkBlSearch}
+              onSearch={() => void fetchContainers(false)}
+              page={containerPage}
+              pageSize={containerPageSize}
+              total={allBlPackingRows.length}
+              totalPages={Math.max(1, Math.ceil(allBlPackingRows.length / containerPageSize))}
+              onPageChange={setContainerPage}
+              onPageSizeChange={(size) => {
+                setContainerPageSize(size);
+                setContainerPage(1);
+              }}
+              sortBy={containerSortBy}
+              sortOrder={containerSortOrder}
+              onSortChange={(by, order) => {
+                setContainerSortBy(by);
+                setContainerSortOrder(order);
+                setContainerPage(1);
+              }}
+            />
           ) : (
             <ContainerSelectionTable
               containers={containers}
@@ -3557,13 +3779,15 @@ export function SalesFormDrawer({
                 setContainerSortOrder(order);
                 setContainerPage(1);
               }}
+              productLineKey={productLineKey}
             />
           )}
         </div>
         <div className="mt-auto flex flex-col gap-2 p-4 border-t sm:flex-row sm:items-center sm:justify-end sm:gap-3">
           <div className="flex flex-1 items-center sm:justify-start">
             <p className="text-sm text-muted-foreground">
-              {Object.keys(rowSelection).filter((key) => rowSelection[key]).length}개 선택됨 (총 {containers.length}개)
+              {Object.keys(rowSelection).filter((key) => rowSelection[key]).length}개 선택됨 (총{' '}
+              {useBlProductLine ? allBlPackingRows.length : containers.length}개)
             </p>
           </div>
           <div className="flex gap-2">
@@ -4496,6 +4720,20 @@ export function SalesFormDrawer({
                         </div>
                       </div>
                     </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="salesNotes">비고</Label>
+                      <Textarea
+                        id="salesNotes"
+                        value={watch('notes') ?? ''}
+                        onChange={(e) => setValue('notes', e.target.value, { shouldDirty: true })}
+                        placeholder="운송·하차 시 참고할 내용을 입력하세요"
+                        rows={3}
+                        className="resize-y min-h-[4.5rem]"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        운송관리 상세에서도 확인할 수 있습니다.
+                      </p>
+                    </div>
                   </section>
                 );
               })()}
@@ -4608,7 +4846,11 @@ export function SalesFormDrawer({
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-semibold text-foreground">상품 정보</h3>
-                    <p className="text-xs text-muted-foreground">판매할 상품을 선택하고 컨테이너를 추가합니다.</p>
+                    <p className="text-xs text-muted-foreground">
+                      {useBlProductLine
+                        ? '판매할 BL·패킹을 선택해 추가합니다. (패킹이 다르면 별도 항목)'
+                        : '판매할 상품을 선택하고 컨테이너를 추가합니다.'}
+                    </p>
                   </div>
                   <Button
                     type="button"
@@ -4624,31 +4866,63 @@ export function SalesFormDrawer({
                 {/* 선택된 컨테이너 목록 - 카드뷰 */}
                 {watch('selectedContainers') && watch('selectedContainers')!.length > 0 && (
                   <div className="space-y-4">
-                    <Label>선택된 컨테이너</Label>
+                    <Label>{useBlProductLine ? '선택된 BL·패킹' : '선택된 컨테이너'}</Label>
                     <div className="space-y-3">
-                      {watch('selectedContainers')!.map((container, index) => {
+                      {(useBlProductLine
+                        ? selectedBlPackingGroups.map((group) => ({
+                            kind: 'bl' as const,
+                            group,
+                            key: group.rowKey,
+                          }))
+                        : (watch('selectedContainers') || []).map((container) => ({
+                            kind: 'container' as const,
+                            container,
+                            key: container.id,
+                          }))
+                      ).map((entry) => {
+                        const blGroup = entry.kind === 'bl' ? entry.group : null;
+                        const container =
+                          entry.kind === 'bl' ? entry.group.containers[0] : entry.container;
+                        const index = 0;
                         // 참조용 남은 수량: 로드 시점 값 캐시(베일/중량 입력 변경 시 동적으로 바뀌지 않음). 카드별(항목별) 키 사용해 같은 컨테이너 여러 항목이어도 각각 정확히 표시
                         // 수정 시: 가용 + 이 건 수량 = 전체 − 다른 판매 (이 건이 해당 컨테이너에서 쓸 수 있는 한도). 추가 시: 가용만 표시
-                        const cacheKey = container.itemId != null ? `item-${container.itemId}` : container.id;
+                        const cacheKey = blGroup
+                          ? `bl-${blGroup.rowKey}`
+                          : container.itemId != null
+                            ? `item-${container.itemId}`
+                            : container.id;
                         if (!containerRemainingCacheRef.current[cacheKey]) {
-                          const aw = container.availableWeight ?? container.weight ?? null;
-                          const ab = container.availableBales ?? container.salesBales ?? container.tradeBales ?? null;
-                          if (mode === 'edit') {
-                            const cw = container.cargoWeight != null ? Number(container.cargoWeight) : 0;
-                            const cb = container.cargoBales != null ? Number(container.cargoBales) : 0;
-                            containerRemainingCacheRef.current[cacheKey] = {
-                              remainingWeight: aw != null ? aw + cw : null,
-                              remainingBales: ab != null ? ab + cb : null,
-                            };
-                          } else {
-                            containerRemainingCacheRef.current[cacheKey] = {
-                              remainingWeight: aw,
-                              remainingBales: ab,
-                            };
-                          }
+                          const groupContainers = blGroup
+                            ? (watch('selectedContainers') || []).filter((c) =>
+                                blGroup.containers.some((bc) => bc.id === c.id),
+                              )
+                            : [container];
+                          let remainingWeight: number | null = null;
+                          let remainingBales: number | null = null;
+                          groupContainers.forEach((gc) => {
+                            const aw = gc.availableWeight ?? gc.weight ?? null;
+                            const ab = gc.availableBales ?? gc.salesBales ?? gc.tradeBales ?? null;
+                            if (mode === 'edit') {
+                              const cw = gc.cargoWeight != null ? Number(gc.cargoWeight) : 0;
+                              const cb = gc.cargoBales != null ? Number(gc.cargoBales) : 0;
+                              remainingWeight =
+                                (remainingWeight ?? 0) + (aw != null ? aw + cw : 0);
+                              remainingBales =
+                                (remainingBales ?? 0) + (ab != null ? ab + cb : 0);
+                            } else {
+                              remainingWeight = (remainingWeight ?? 0) + (aw ?? 0);
+                              remainingBales = (remainingBales ?? 0) + (ab ?? 0);
+                            }
+                          });
+                          containerRemainingCacheRef.current[cacheKey] = {
+                            remainingWeight,
+                            remainingBales,
+                          };
                         }
                         const cachedRemaining = containerRemainingCacheRef.current[cacheKey];
-                        const status = container.inboundStatus;
+                        const status = blGroup?.inboundStatusMixed
+                          ? null
+                          : (blGroup?.inboundStatus ?? container.inboundStatus);
                         const statusStyles: Record<string, { variant: 'default' | 'secondary' | 'outline' | 'destructive'; className?: string }> = {
                           INBOUND_PENDING: {
                             variant: 'outline',
@@ -4667,7 +4941,15 @@ export function SalesFormDrawer({
                           variant: 'outline' as const, 
                           className: 'border-gray-500 bg-gray-50 text-gray-700 dark:border-gray-400 dark:bg-gray-950/30 dark:text-gray-300' 
                         };
-                        const statusLabel = status === 'INBOUND_PENDING' ? '입고대기' : status === 'INBOUND_SCHEDULED' ? '입고예정' : status === 'INBOUND_CONFIRMED' ? '입고확정' : '입고대기';
+                        const statusLabel = blGroup?.inboundStatusMixed
+                          ? '혼합'
+                          : status === 'INBOUND_PENDING'
+                            ? '입고대기'
+                            : status === 'INBOUND_SCHEDULED'
+                              ? '입고예정'
+                              : status === 'INBOUND_CONFIRMED'
+                                ? '입고확정'
+                                : '입고대기';
                         
                         const contractNo = container.contractNo || '-';
                         const sequence = container.sequence;
@@ -4676,14 +4958,88 @@ export function SalesFormDrawer({
                         
                         const updateContainer = (updates: Partial<SelectedContainer>) => {
                           const current = watch('selectedContainers') || [];
-                          const updated = current.map((c) => 
-                            c.id === container.id ? { ...c, ...updates } : c
+                          const transportFee = watch('transportFee') ?? 0;
+                          if (blGroup) {
+                            const ids = new Set(blGroup.containers.map((c) => c.id));
+                            const groupFull = current.filter((c) => ids.has(c.id));
+                            const cargoDistribution =
+                              updates.cargoBales != null || updates.cargoWeight != null
+                                ? distributeBlPackingCargo(
+                                    groupFull,
+                                    updates.cargoBales ??
+                                      groupFull.reduce(
+                                        (s, c) => s + (Number(c.cargoBales ?? 0) || 0),
+                                        0,
+                                      ),
+                                    updates.cargoWeight ??
+                                      groupFull.reduce(
+                                        (s, c) => s + (Number(c.cargoWeight ?? 0) || 0),
+                                        0,
+                                      ),
+                                  )
+                                : null;
+                            const totalWeight = current.reduce((sum, c) => {
+                              const w =
+                                c.containerType === 'CARGO' ? (c.cargoWeight ?? 0) : (c.weight ?? 0);
+                              return sum + w;
+                            }, 0);
+                            const updated = current.map((c) => {
+                              if (!ids.has(c.id)) return c;
+                              const cargoPart = cargoDistribution?.get(c.id);
+                              const next = {
+                                ...c,
+                                ...updates,
+                                ...(cargoPart
+                                  ? {
+                                      cargoBales: cargoPart.cargoBales,
+                                      cargoWeight: cargoPart.cargoWeight,
+                                      containerType: 'CARGO' as const,
+                                    }
+                                  : {}),
+                              };
+                              const purchaseCost =
+                                next.inboundStatus === 'INBOUND_CONFIRMED'
+                                  ? next.confirmedPurchaseCost
+                                    ? Number(next.confirmedPurchaseCost)
+                                    : 0
+                                  : next.comparisonPurchaseCost != null
+                                    ? Number(next.comparisonPurchaseCost)
+                                    : next.pendingPurchaseCost
+                                      ? Number(next.pendingPurchaseCost)
+                                      : 0;
+                              const currentWeight =
+                                next.containerType === 'CARGO'
+                                  ? (next.cargoWeight ?? 0)
+                                  : (next.weight ?? 0);
+                              let margin = next.margin ?? 0;
+                              let salesUnitPrice = next.salesUnitPrice ?? purchaseCost + margin;
+                              if (currentWeight > 0 && totalWeight > 0) {
+                                const weightRatio = currentWeight / totalWeight;
+                                const transportFeePerKg =
+                                  (transportFee * weightRatio) / (currentWeight * 1000);
+                                if (updates.salesUnitPrice != null) {
+                                  margin = salesUnitPrice - purchaseCost - transportFeePerKg;
+                                } else if (updates.margin != null) {
+                                  salesUnitPrice = purchaseCost + transportFeePerKg + margin;
+                                }
+                              }
+                              const salesPrice =
+                                salesUnitPrice > 0 && currentWeight > 0
+                                  ? salesUnitPrice * currentWeight * 1000
+                                  : 0;
+                              return { ...next, margin, salesUnitPrice, salesPrice };
+                            });
+                            setValue('selectedContainers', updated, { shouldDirty: true });
+                            return;
+                          }
+                          const updated = current.map((c) =>
+                            c.id === container.id ? { ...c, ...updates } : c,
                           );
                           setValue('selectedContainers', updated, { shouldDirty: true });
                         };
                         
                         return (
-                          <Card key={container.id} className="relative py-0">
+                          <Card key={entry.key} className="relative py-0">
                             <CardContent className="p-4">
                               {/* 컨테이너 정보 2줄 */}
                               <div className="space-y-2 mb-3">
@@ -4694,8 +5050,20 @@ export function SalesFormDrawer({
                                       {statusLabel}
                                     </Badge>
                                     <span className="text-sm font-medium truncate">
-                                      {container.containerNo}
-                                      {container.sequence != null && ` [${container.sequence}]`}
+                                      {blGroup ? (
+                                        <>
+                                          {blGroup.bl || blGroup.bk || '-'}
+                                          <span className="ml-1.5 font-normal text-muted-foreground">
+                                            · {blGroup.packingName || blGroup.packingType || '패킹 미지정'}
+                                            · {blGroup.containerCount}컨
+                                          </span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          {container.containerNo}
+                                          {container.sequence != null && ` [${container.sequence}]`}
+                                        </>
+                                      )}
                                     </span>
                                   </div>
                                   <Button
@@ -4705,30 +5073,63 @@ export function SalesFormDrawer({
                                     className="h-6 w-6 flex-shrink-0"
                                     onClick={() => {
                                       const current = watch('selectedContainers') || [];
-                                      setValue('selectedContainers', current.filter((c) => c.id !== container.id), { shouldDirty: true });
+                                      if (blGroup) {
+                                        const ids = new Set(blGroup.containers.map((c) => c.id));
+                                        setValue(
+                                          'selectedContainers',
+                                          current.filter((c) => !ids.has(c.id)),
+                                          { shouldDirty: true },
+                                        );
+                                      } else {
+                                        setValue(
+                                          'selectedContainers',
+                                          current.filter((c) => c.id !== container.id),
+                                          { shouldDirty: true },
+                                        );
+                                      }
                                     }}
                                   >
                                     <X className="h-4 w-4" />
                                   </Button>
                                 </div>
-                                {/* 두 번째 줄: BL, 계약번호, 제품명, ETA, 창고 */}
                                 <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
-                                  <span className="text-sm text-muted-foreground truncate">
-                                    BL: {container.bl || '-'}
-                                  </span>
-                                  <span className="text-xs text-muted-foreground">·</span>
+                                  {!blGroup ? (
+                                    <>
+                                      <span className="text-sm text-muted-foreground truncate">
+                                        BL: {container.bl || '-'}
+                                      </span>
+                                      <span className="text-xs text-muted-foreground">·</span>
+                                    </>
+                                  ) : null}
                                   <span className="text-sm text-muted-foreground truncate">
                                     계약번호: {contractDisplay}
                                   </span>
                                   <span className="text-xs text-muted-foreground">·</span>
-                                  <span className="text-sm text-muted-foreground truncate">{getProductName(container.productName || container.product) || '-'}</span>
+                                  <span className="text-sm text-muted-foreground truncate">
+                                    {getProductName(
+                                      (blGroup?.productName ?? container.productName ?? container.product) || '',
+                                    ) || '-'}
+                                  </span>
                                   <span className="text-xs text-muted-foreground">·</span>
                                   <span className="text-sm text-muted-foreground">
-                                    ETA: {container.etaDate ? (() => { const d = new Date(container.etaDate!); return `${String(d.getFullYear()).slice(-2)}. ${d.getMonth() + 1}. ${d.getDate()}.`; })() : '-'}
+                                    ETA:{' '}
+                                    {blGroup?.etaDateMixed
+                                      ? '혼합'
+                                      : (blGroup?.etaDate ?? container.etaDate)
+                                        ? (() => {
+                                            const d = new Date(
+                                              (blGroup?.etaDate ?? container.etaDate)!,
+                                            );
+                                            return `${String(d.getFullYear()).slice(-2)}. ${d.getMonth() + 1}. ${d.getDate()}.`;
+                                          })()
+                                        : '-'}
                                   </span>
                                   <span className="text-xs text-muted-foreground">·</span>
                                   <span className="text-sm text-muted-foreground truncate">
-                                    창고: {container.warehouseName || '-'}
+                                    창고:{' '}
+                                    {blGroup?.warehouseMixed
+                                      ? '혼합'
+                                      : blGroup?.warehouseName ?? container.warehouseName ?? '-'}
                                   </span>
                                 </div>
                                 {/* 세 번째 줄: 등급(영업만), 중량, 베일, 환율, 확정원가/운송비/실제원가 */}
@@ -4737,13 +5138,31 @@ export function SalesFormDrawer({
                                     등급: {salesGradeCodes?.find((c) => c.value === container.salesGrade)?.name || container.salesGrade || '-'}
                                   </span>
                                   <span className="text-xs text-muted-foreground">·</span>
-                                  <span className="text-sm text-muted-foreground" title="해당 컨테이너: 남은 수량(이 건 포함) / 전체. 참조용이며 베일/중량 입력 변경 시 바뀌지 않음">
+                                  <span
+                                    className="text-sm text-muted-foreground"
+                                    title={
+                                      blGroup
+                                        ? 'BL·패킹 합계: 남은/전체 베일 (참조용)'
+                                        : '해당 컨테이너: 남은 수량(이 건 포함) / 전체. 참조용이며 베일/중량 입력 변경 시 바뀌지 않음'
+                                    }
+                                  >
                                     베일(남은/전체): {(() => {
-                                      const totalBales = container.salesBales ?? container.tradeBales ?? null;
-                                      const cargoBales = container.cargoBales != null ? Number(container.cargoBales) : 0;
-                                      const soldBales = container.soldBales ?? null;
+                                      const totalBales = blGroup
+                                        ? blGroup.totalBales
+                                        : (container.salesBales ?? container.tradeBales ?? null);
+                                      const cargoBales = blGroup
+                                        ? blGroup.containers.reduce(
+                                            (s, c) => s + (Number(c.cargoBales ?? 0) || 0),
+                                            0,
+                                          )
+                                        : container.cargoBales != null
+                                          ? Number(container.cargoBales)
+                                          : 0;
+                                      const soldBales = blGroup ? blGroup.soldBales : (container.soldBales ?? null);
                                       const hasSales = (soldBales ?? 0) > 0;
-                                      const displayRemaining = cachedRemaining.remainingBales ?? totalBales;
+                                      const displayRemaining = blGroup
+                                        ? blGroup.availableBales
+                                        : (cachedRemaining.remainingBales ?? totalBales);
                                       
                                       if (totalBales == null) return '-';
                                       if (hasSales || cargoBales > 0) {
@@ -4763,30 +5182,55 @@ export function SalesFormDrawer({
                                     })()}
                                   </span>
                                   <span className="text-xs text-muted-foreground">·</span>
-                                  <span className="text-sm text-muted-foreground" title="해당 컨테이너: 남은 수량(이 건 포함) / 전체. 참조용이며 베일/중량 입력 변경 시 바뀌지 않음">
+                                  <span
+                                    className="text-sm text-muted-foreground"
+                                    title={
+                                      blGroup
+                                        ? 'BL·패킹 합계: 남은/전체 중량 (참조용)'
+                                        : '해당 컨테이너: 남은 수량(이 건 포함) / 전체. 참조용이며 베일/중량 입력 변경 시 바뀌지 않음'
+                                    }
+                                  >
                                     중량(남은/전체): {(() => {
-                                      const totalWeight = container.weight ?? null;
-                                      const cargoWeight = container.cargoWeight != null ? Number(container.cargoWeight) : 0;
-                                      const soldWeight = container.soldWeight ?? null;
-                                      const hasSales = (soldWeight ?? 0) > 0;
-                                      const displayRemaining = cachedRemaining.remainingWeight ?? totalWeight;
-                                      
-                                      if (totalWeight == null) return '-';
-                                      if (hasSales || cargoWeight > 0) {
+                                      const totalKg = blGroup
+                                        ? blGroup.totalKg
+                                        : container.weight != null
+                                          ? (container.weight ?? 0) * 1000
+                                          : null;
+                                      const cargoKg = blGroup
+                                        ? blGroup.containers.reduce(
+                                            (s, c) => s + (Number(c.cargoWeight ?? 0) || 0) * 1000,
+                                            0,
+                                          )
+                                        : container.cargoWeight != null
+                                          ? Number(container.cargoWeight) * 1000
+                                          : 0;
+                                      const soldKg = blGroup ? blGroup.soldKg : (container.soldWeight ?? 0) * 1000;
+                                      const hasSales = (soldKg ?? 0) > 0;
+                                      const displayRemainingKg = blGroup
+                                        ? blGroup.availableKg
+                                        : (cachedRemaining.remainingWeight ?? 0) * 1000;
+
+                                      if (totalKg == null) return '-';
+                                      if (hasSales || cargoKg > 0) {
                                         return (
                                           <span>
                                             <span className="font-semibold text-blue-600 dark:text-blue-400">
-                                              {Math.round((displayRemaining ?? 0) * 1000).toLocaleString('ko-KR')}
+                                              {Math.round(displayRemainingKg ?? 0).toLocaleString('ko-KR')}
                                             </span>
                                             <span className="text-muted-foreground">/</span>
                                             <span className="text-xs text-muted-foreground">
-                                              {Math.round((totalWeight ?? 0) * 1000).toLocaleString('ko-KR')}
+                                              {Math.round(totalKg).toLocaleString('ko-KR')}
                                             </span>
                                             <span className="text-xs text-muted-foreground"> KG</span>
                                           </span>
                                         );
                                       }
-                                      return <span>{Math.round((totalWeight ?? 0) * 1000).toLocaleString('ko-KR')} KG <span className="text-xs">(전체)</span></span>;
+                                      return (
+                                        <span>
+                                          {Math.round(totalKg).toLocaleString('ko-KR')} KG{' '}
+                                          <span className="text-xs">(전체)</span>
+                                        </span>
+                                      );
                                     })()}
                                   </span>
                                   <span className="text-xs text-muted-foreground">·</span>
@@ -4852,7 +5296,11 @@ export function SalesFormDrawer({
                                     <Label htmlFor={`containerType-${container.id}`} className="text-xs">타입</Label>
                                     {(() => {
                                       // 이미 일부가 판매된 경우 (soldBales > 0 또는 soldWeight > 0)
-                                      const hasPartialSales = (container.soldBales ?? 0) > 0 || (container.soldWeight ?? 0) > 0;
+                                      const hasPartialSales = blGroup
+                                        ? blGroup.containers.some(
+                                            (c) => (c.soldBales ?? 0) > 0 || (c.soldWeight ?? 0) > 0,
+                                          )
+                                        : (container.soldBales ?? 0) > 0 || (container.soldWeight ?? 0) > 0;
                                       
                                       // 이미 일부가 판매된 경우 카고만 선택 가능
                                       if (hasPartialSales) {
@@ -4985,11 +5433,33 @@ export function SalesFormDrawer({
                                   </div>
                                   
                                   {container.containerType === 'CARGO' && (() => {
-                                    // 베일당 중량 계산 (남은 수량 기준)
-                                    const availableBales = container.availableBales ?? container.salesBales ?? container.tradeBales ?? 0;
-                                    const availableWeight = container.availableWeight ?? container.weight ?? 0;
-                                    const totalBales = container.salesBales ?? container.tradeBales ?? 0;
-                                    const totalWeight = container.weight ?? 0;
+                                    const groupCargoBales = blGroup
+                                      ? blGroup.containers.reduce(
+                                          (s, c) => s + (Number(c.cargoBales ?? 0) || 0),
+                                          0,
+                                        )
+                                      : null;
+                                    const groupCargoWeight = blGroup
+                                      ? blGroup.containers.reduce(
+                                          (s, c) => s + (Number(c.cargoWeight ?? 0) || 0),
+                                          0,
+                                        )
+                                      : null;
+                                    const availableBales = blGroup
+                                      ? blGroup.availableBales
+                                      : (container.availableBales ??
+                                        container.salesBales ??
+                                        container.tradeBales ??
+                                        0);
+                                    const availableWeight = blGroup
+                                      ? blGroup.availableKg / 1000
+                                      : (container.availableWeight ?? container.weight ?? 0);
+                                    const totalBales = blGroup
+                                      ? blGroup.totalBales
+                                      : (container.salesBales ?? container.tradeBales ?? 0);
+                                    const totalWeight = blGroup
+                                      ? blGroup.totalKg / 1000
+                                      : (container.weight ?? 0);
                                     const weightPerBale = totalBales > 0 ? totalWeight / totalBales : 0;
                                     
                                     return (
@@ -5004,16 +5474,21 @@ export function SalesFormDrawer({
                                             )}
                                           </Label>
                                           <NumberInput
-                                            id={`cargoBales-${container.id}`}
-                                            value={container.cargoBales ?? (availableBales > 0 ? availableBales : container.salesBales ?? container.tradeBales ?? 0)}
+                                            id={`cargoBales-${entry.key}`}
+                                            value={
+                                              groupCargoBales ??
+                                              container.cargoBales ??
+                                              (availableBales > 0
+                                                ? availableBales
+                                                : (container.salesBales ?? container.tradeBales ?? 0))
+                                            }
                                             onChange={() => {
                                               // onChange에서는 아무것도 하지 않음 (blur에서 처리)
                                             }}
                                             onBlur={(e) => {
                                               const value = parseFloat(e.target.value.replace(/,/g, '')) || 0;
                                               const cargoBales = value < 0 ? 0 : value;
-                                              // 베일만 반영, 중량은 사용자가 직접 입력 (예상 중량은 참고용으로만 표시)
-                                              updateContainer({ cargoBales });
+                                              updateContainer({ cargoBales, containerType: 'CARGO' });
                                             }}
                                             decimals={2}
                                             className="h-8 text-xs"
@@ -5033,36 +5508,21 @@ export function SalesFormDrawer({
                                             )}
                                           </Label>
                                           <NumberInput
-                                            id={`cargoWeight-${container.id}`}
-                                            value={((container.cargoWeight ?? (availableWeight > 0 ? availableWeight : container.weight ?? 0)) * 1000)}
+                                            id={`cargoWeight-${entry.key}`}
+                                            value={
+                                              (groupCargoWeight ??
+                                                container.cargoWeight ??
+                                                (availableWeight > 0
+                                                  ? availableWeight
+                                                  : (container.weight ?? 0))) * 1000
+                                            }
                                             onChange={() => {
                                               // onChange에서는 아무것도 하지 않음 (blur에서 처리)
                                             }}
                                             onBlur={(e) => {
                                               const valueKg = parseFloat(e.target.value.replace(/,/g, '')) || 0;
                                               const cargoWeight = valueKg < 0 ? 0 : valueKg / 1000;
-                                              // 중량만 반영, 베일은 사용자가 직접 입력 (예상 베일은 참고용). 중량에 따라 마진·판매가만 재계산
-                                              const allContainers = watch('selectedContainers') || [];
-                                              const transportFee = watch('transportFee') ?? 0;
-                                              const finalTotalWeight = allContainers.reduce((sum, c) => {
-                                                const w = c.id === container.id ? cargoWeight : (c.containerType === 'CARGO' ? (c.cargoWeight ?? 0) : (c.weight ?? 0));
-                                                return sum + w;
-                                              }, 0);
-                                              const purchaseCost = container.confirmedPurchaseCost
-                                                ? Number(container.confirmedPurchaseCost)
-                                                : (container.comparisonPurchaseCost != null ? Number(container.comparisonPurchaseCost) : (container.pendingPurchaseCost ? Number(container.pendingPurchaseCost) : 0));
-                                              const salesUnitPrice = container.salesUnitPrice ?? purchaseCost;
-                                              let newMargin = container.margin ?? 0;
-                                              if (transportFee > 0 && finalTotalWeight > 0 && cargoWeight > 0) {
-                                                const weightRatio = cargoWeight / finalTotalWeight;
-                                                const allocatedTransportFee = transportFee * weightRatio;
-                                                const transportFeePerKg = allocatedTransportFee / (cargoWeight * 1000);
-                                                newMargin = salesUnitPrice - purchaseCost - transportFeePerKg;
-                                              } else {
-                                                newMargin = salesUnitPrice - purchaseCost;
-                                              }
-                                              const newSalesPrice = salesUnitPrice > 0 && cargoWeight > 0 ? salesUnitPrice * cargoWeight * 1000 : 0;
-                                              updateContainer({ cargoWeight, margin: newMargin, salesPrice: newSalesPrice });
+                                              updateContainer({ cargoWeight, containerType: 'CARGO' });
                                             }}
                                             decimals={3}
                                             className="h-8 text-xs"
@@ -5450,7 +5910,10 @@ export function SalesFormDrawer({
                 {/* 전체 요약 정보 (2개 이상일 때만 표시) */}
                 {(() => {
                   const selectedContainers = watch('selectedContainers') || [];
-                  if (selectedContainers.length < 2) return null;
+                  const lineCount = useBlProductLine
+                    ? selectedBlPackingGroups.length
+                    : selectedContainers.length;
+                  if (lineCount < 2) return null;
 
                   // 전체 베일수, 중량, 판매가, 선입금 계산
                   let totalBales = 0;

@@ -34,6 +34,8 @@ export interface CreateSalesDto {
   advancePaymentAmount?: number | null;
   /** 예약 등록(RESERVED) / 판매 등록(SALE). 없으면 입고상태 기준 자동 */
   registerAs?: 'RESERVED' | 'SALE';
+  /** 판매 비고 */
+  notes?: string | null;
   items: Array<{
     containerId: string;
     containerType?: 'CONTAINER' | 'CARGO' | null;
@@ -107,6 +109,7 @@ export interface Sales {
   salesDate: string | null;
   requestVehicle: string | null;
   transportFee: number | null;
+  notes?: string | null;
   registeredBy: number | null;
   registeredByName: string | null;
   createdAt: string;
@@ -256,6 +259,8 @@ export interface SalesDetail extends Sales {
   }>;
   /** sa_status (RESERVED/SOLD/COMPLETED) - 판매 확정 버튼 표시용 */
   salesStatus?: 'RESERVED' | 'SOLD' | 'COMPLETED' | null;
+  /** 판매 비고 (API 연동 후 저장·조회) */
+  notes?: string | null;
 }
 
 export function useSalesDetail(salesId?: string) {
@@ -301,6 +306,7 @@ export function useCreateSales() {
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['sales'] });
+      queryClient.invalidateQueries({ queryKey: ['sales-delivery'] });
       // 하차지→선택 배송지 반영 후 고객 상세·배송지 목록 갱신
       queryClient.invalidateQueries({ queryKey: ['customers'] });
       const cid = variables?.customerId?.trim();
@@ -337,6 +343,7 @@ export function useUpdateSales() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       queryClient.invalidateQueries({ queryKey: ['sales', 'detail', variables.id] });
+      queryClient.invalidateQueries({ queryKey: ['sales-delivery'] });
       queryClient.invalidateQueries({ queryKey: ['customers'] });
       const cid = variables.data?.customerId?.trim();
       if (cid) {
@@ -378,6 +385,7 @@ export function useConfirmSales() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       queryClient.invalidateQueries({ queryKey: ['sales', 'detail', variables.id] });
+      queryClient.invalidateQueries({ queryKey: ['sales-delivery'] });
       queryClient.invalidateQueries({ queryKey: ['customers'] });
       const cid = variables.data?.customerId?.trim();
       if (cid) {

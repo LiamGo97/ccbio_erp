@@ -322,16 +322,16 @@ export function useDeleteCustomer() {
 }
 
 export interface CreateStatementNameDto {
-  companyName?: string;
+  companyName?: string | null;
   displayName: string;
-  contactPhone?: string;
+  contactPhone?: string | null;
   isDefault?: boolean;
 }
 
 export interface UpdateStatementNameDto {
-  companyName?: string;
+  companyName?: string | null;
   displayName?: string;
-  contactPhone?: string;
+  contactPhone?: string | null;
   isDefault?: boolean;
 }
 

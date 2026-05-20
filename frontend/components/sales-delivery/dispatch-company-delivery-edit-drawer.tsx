@@ -123,7 +123,7 @@ export const DispatchCompanyDeliveryEditDrawer: React.FC<DispatchCompanyDelivery
     reset,
     setValue,
     watch,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, dirtyFields },
   } = useForm<DispatchCompanyDeliveryEditFormData>({
     defaultValues: React.useMemo(
       () => ({
@@ -179,31 +179,46 @@ export const DispatchCompanyDeliveryEditDrawer: React.FC<DispatchCompanyDelivery
       return;
     }
 
-    const strOrNull = (v: string | null | undefined) => {
-      if (v == null) return null;
-      const t = v.trim();
+    /** 변경하지 않은 필드는 undefined → 백엔드가 기존 값 유지. 의도적으로 비운 필드만 null */
+    const dirtyString = (
+      key: keyof Pick<
+        DispatchCompanyDeliveryEditFormData,
+        | 'vehicleNumber'
+        | 'driverContact'
+        | 'driverName'
+        | 'entryTime'
+        | 'loadingDateTime'
+        | 'unloadingDateTime'
+      >,
+      value: string,
+    ): string | null | undefined => {
+      if (!dirtyFields[key]) return undefined;
+      const t = value.trim();
       return t === '' ? null : t;
+    };
+
+    const dirtyFee = (
+      key: 'transportFee' | 'weighingFee',
+      value: string,
+    ): number | null | undefined => {
+      if (!dirtyFields[key]) return undefined;
+      if (value === '' || value == null) return null;
+      return parseFloat(String(value)) * 10000;
     };
 
     try {
       await updateMutation.mutateAsync({
         id: delivery.id.toString(),
         data: {
-          vehicleNumber: strOrNull(data.vehicleNumber),
-          driverContact: strOrNull(data.driverContact),
-          driverName: strOrNull(data.driverName),
-          entryTime: strOrNull(data.entryTime),
-          loadingDateTime: strOrNull(data.loadingDateTime),
-          unloadingDateTime: strOrNull(data.unloadingDateTime),
-          transportFee:
-            data.transportFee === '' || data.transportFee == null
-              ? null
-              : parseFloat(String(data.transportFee)) * 10000,
-          weighingFee:
-            data.weighingFee === '' || data.weighingFee == null
-              ? null
-              : parseFloat(String(data.weighingFee)) * 10000,
-          status: data.status || undefined,
+          vehicleNumber: dirtyString('vehicleNumber', data.vehicleNumber),
+          driverContact: dirtyString('driverContact', data.driverContact),
+          driverName: dirtyString('driverName', data.driverName),
+          entryTime: dirtyString('entryTime', data.entryTime),
+          loadingDateTime: dirtyString('loadingDateTime', data.loadingDateTime),
+          unloadingDateTime: dirtyString('unloadingDateTime', data.unloadingDateTime),
+          transportFee: dirtyFee('transportFee', data.transportFee),
+          weighingFee: dirtyFee('weighingFee', data.weighingFee),
+          status: dirtyFields.status ? data.status || undefined : undefined,
         },
       });
 

@@ -489,6 +489,42 @@ function getInboundScheduledDisplayCounts(containers: TradeContainerDto[] | null
   return normalizeInboundReservedAvailableDisplay(reservedCnt, containerCount, soldCnt);
 }
 
+/** 입항 예정 등 `TradeOrder` 목록: 주문에만 BL 단위 분리 필드가 있으면 첫 컨에 합쳐 통관 전 재고와 동일 환산 */
+function orderHasBlReservationBreakdown(order: TradeOrder): boolean {
+  return (
+    'salesMgmtReservationBalesByBl' in order ||
+    'salesMgmtReservationWeightMtByBl' in order ||
+    'gridSheetReservationContainerUnits' in order
+  );
+}
+
+function containersWithOrderBlBreakdownForStock(order: TradeOrder): TradeContainerDto[] {
+  const cs = order.containers ?? [];
+  if (!orderHasBlReservationBreakdown(order)) return cs;
+  const firstIdx = cs.findIndex((c) => c.excludeFromInventory !== true);
+  if (firstIdx < 0) return cs;
+  const first = cs[firstIdx];
+  if (containerRowHasReservationBreakdown(first)) return cs;
+  return cs.map((c, i) =>
+    i === firstIdx
+      ? {
+          ...c,
+          salesMgmtReservationBalesByBl: order.salesMgmtReservationBalesByBl ?? null,
+          salesMgmtReservationWeightMtByBl: order.salesMgmtReservationWeightMtByBl ?? null,
+          gridSheetReservationContainerUnits: order.gridSheetReservationContainerUnits ?? null,
+        }
+      : c,
+  );
+}
+
+function getTradeOrderInboundScheduledDisplayCounts(order: TradeOrder) {
+  return getInboundScheduledDisplayCounts(containersWithOrderBlBreakdownForStock(order));
+}
+
+function getTradeOrderInboundScheduledContainerEquivalents(order: TradeOrder) {
+  return getInboundScheduledContainerEquivalents(containersWithOrderBlBreakdownForStock(order));
+}
+
 function coerceSheetReservationNumber(value: unknown): number {
   if (value == null) return 0;
   if (typeof value === 'string' && value.trim() === '') return 0;
@@ -897,6 +933,16 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
           aVal = (a.containers ?? []).length;
           bVal = (b.containers ?? []).length;
           return order * (aVal - bVal);
+        case 'reservedCnt': {
+          aVal = getTradeOrderInboundScheduledContainerEquivalents(a).reservedCnt;
+          bVal = getTradeOrderInboundScheduledContainerEquivalents(b).reservedCnt;
+          return order * (aVal - bVal);
+        }
+        case 'availableCnt': {
+          aVal = getTradeOrderInboundScheduledContainerEquivalents(a).availableCnt;
+          bVal = getTradeOrderInboundScheduledContainerEquivalents(b).availableCnt;
+          return order * (aVal - bVal);
+        }
         case 'etaDate':
           aVal = a.etaDate ? new Date(a.etaDate).getTime() : 0;
           bVal = b.etaDate ? new Date(b.etaDate).getTime() : 0;
@@ -2361,17 +2407,34 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
                     size="sm"
                     className="shrink-0"
                     onClick={() => {
-                      const headers = ['상품명', 'BL', '수출사', '영업 등급', '컨 수량', '입항일', '입고 창고', '입고일정', '검역일정', '송장 금액', '비고'];
+                      const headers = [
+                        '상품명',
+                        'BL',
+                        '수출사',
+                        '영업 등급',
+                        '컨 수량',
+                        '예약',
+                        '가용재고',
+                        '입항일',
+                        '입고 창고',
+                        '입고일정',
+                        '검역일정',
+                        '송장 금액',
+                        '비고',
+                      ];
                       const rows: (string | number)[][] = etaOrders.map((order) => {
                         const warehouseCode = order.confirmedInbound?.warehouse ?? order.pendingInbound?.warehouse ?? '';
                         const inboundSchedule = formatMonthDay(order.confirmedInbound?.igodate ?? order.pendingInbound?.igodate) || '';
                         const quarantineSchedule = formatMonthDay(order.quarantineDate ?? order.confirmedInbound?.quarantineDate ?? order.pendingInbound?.quarantineDate) || '';
+                        const { reservedDisplay, availableDisplay } = getTradeOrderInboundScheduledDisplayCounts(order);
                         return [
                           getProductName(order.productName),
                           order.bl ?? '',
                           order.exporterName ?? '',
                           getGradeName(order),
                           (order.containers ?? []).length,
+                          reservedDisplay > 0 ? Number(reservedDisplay.toFixed(1)) : '',
+                          availableDisplay > 0 ? Number(availableDisplay.toFixed(1)) : '',
                           formatMonthDay(order.etaDate),
                           getWarehouseName(warehouseCode) || warehouseCode,
                           inboundSchedule,
@@ -2416,6 +2479,8 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
                             { key: 'exporterName', label: '수출사', className: 'min-w-[55px]', align: 'left' as const },
                             { key: 'grade', label: '영업 등급', className: 'min-w-[55px]', align: 'left' as const },
                             { key: 'containerCount', label: '컨 수량', className: 'min-w-[55px]', align: 'right' as const },
+                            { key: 'reservedCnt', label: '예약', className: 'min-w-[55px]', align: 'right' as const },
+                            { key: 'availableCnt', label: '가용재고', className: 'min-w-[55px]', align: 'right' as const },
                             { key: 'etaDate', label: '입항일', className: 'min-w-[65px]', align: 'left' as const },
                             { key: 'inboundWarehouse', label: '입고 창고', className: 'min-w-[70px]', align: 'left' as const },
                             { key: 'inboundSchedule', label: '입고일정', className: 'min-w-[65px]', align: 'left' as const },
@@ -2462,6 +2527,7 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
                                 order.confirmedInbound?.quarantineDate ??
                                 order.pendingInbound?.quarantineDate
                             ) || '';
+                          const { reservedDisplay, availableDisplay } = getTradeOrderInboundScheduledDisplayCounts(order);
                           return (
                             <TableRow key={order.id} className={`border-b border-border last:border-0 hover:bg-muted/30 ${order.shipBack === true ? 'line-through text-muted-foreground' : ''}`}>
                               <TableCell className="text-sm">{getProductName(order.productName)}</TableCell>
@@ -2470,6 +2536,16 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
                               <TableCell className="text-sm">{getGradeName(order)}</TableCell>
                               <TableCell className="text-sm text-right tabular-nums">
                                 {(order.containers ?? []).length}
+                              </TableCell>
+                              <TableCell className="text-sm text-right tabular-nums">
+                                {reservedDisplay > 0
+                                  ? reservedDisplay.toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+                                  : '-'}
+                              </TableCell>
+                              <TableCell className="text-sm text-right tabular-nums">
+                                {availableDisplay > 0
+                                  ? availableDisplay.toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+                                  : '-'}
                               </TableCell>
                               <TableCell className="text-sm">{formatMonthDay(order.etaDate)}</TableCell>
                               <TableCell className="text-sm">{inboundWarehouse}</TableCell>
@@ -2493,6 +2569,16 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
                           <TableCell className="text-sm" />
                           <TableCell className="text-sm" />
                           <TableCell className="text-sm text-right tabular-nums">{etaTotal}</TableCell>
+                          <TableCell className="text-sm text-right tabular-nums">
+                            {etaOrdersSorted
+                              .reduce((sum, o) => sum + getTradeOrderInboundScheduledDisplayCounts(o).reservedDisplay, 0)
+                              .toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                          </TableCell>
+                          <TableCell className="text-sm text-right tabular-nums">
+                            {etaOrdersSorted
+                              .reduce((sum, o) => sum + getTradeOrderInboundScheduledDisplayCounts(o).availableDisplay, 0)
+                              .toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                          </TableCell>
                           <TableCell className="text-sm" colSpan={4} />
                           <TableCell className="text-sm text-right tabular-nums">
                             {allSameCurrency && withInv.length > 0 ? formatInvoiceAmount(sumAmount, sumCurrency) : withInv.length > 0 ? '혼합통화' : '-'}

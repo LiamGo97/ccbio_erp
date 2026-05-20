@@ -15,6 +15,11 @@ import { City } from '../cities/entities/city.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { CreateSalesDeliveryDto } from './dto/create-sales-delivery.dto';
 import { UpdateSalesDeliveryDto } from './dto/update-sales-delivery.dto';
+import {
+  DriverDeliveryGroupsResponseDto,
+  DriverDeliveryGroupDto,
+  DriverDeliverySummaryDto,
+} from './dto/driver-delivery-group-response.dto';
 import { FeatureAuditLogService } from '../feature-audit-log/feature-audit-log.service';
 import { CustomersService } from '../customers/customers.service';
 
@@ -363,6 +368,189 @@ export class SalesDeliveryService {
       total,
       page,
       lastPage: Math.ceil(total / limit),
+    };
+  }
+
+  private normalizeDriverGroupPart(value?: string | null): string {
+    return (value ?? '').trim().toLowerCase();
+  }
+
+  private normalizeDriverPhone(value?: string | null): string {
+    return (value ?? '').replace(/[^0-9]/g, '');
+  }
+
+  private buildDriverGroupKeyFromFields(
+    vehicleNumber?: string | null,
+    driverName?: string | null,
+    driverContact?: string | null,
+  ): string {
+    const vehicle = this.normalizeDriverGroupPart(vehicleNumber);
+    const name = this.normalizeDriverGroupPart(driverName);
+    const phone = this.normalizeDriverPhone(driverContact);
+    return `${vehicle}|${name}|${phone}`;
+  }
+
+  private buildDriverGroupLabel(
+    vehicleNumber: string,
+    driverName: string,
+    driverContact: string,
+  ): string {
+    const parts = [vehicleNumber, driverName, driverContact].filter((p) => p.trim() !== '');
+    return parts.join(' · ');
+  }
+
+  /**
+   * 기사별 운송: 배차 필드 + 상차 항목 타입 집계 후 그룹핑
+   */
+  async findAllGroupedByDriver(search?: string): Promise<DriverDeliveryGroupsResponseDto> {
+    const params: unknown[] = [];
+    let paramIdx = 1;
+
+    let searchClause = '';
+    if (search?.trim()) {
+      const searchLower = `%${search.trim().toLowerCase()}%`;
+      searchClause = ` AND (
+        LOWER(COALESCE(d.sd_order_number, '')) LIKE $${paramIdx}
+        OR LOWER(COALESCE(d.sd_driver_name, '')) LIKE $${paramIdx}
+        OR LOWER(COALESCE(d.sd_vehicle_number, '')) LIKE $${paramIdx}
+        OR LOWER(COALESCE(d.sd_driver_contact, '')) LIKE $${paramIdx}
+      )`;
+      params.push(searchLower);
+      paramIdx += 1;
+    }
+
+    const rows = await this.dataSource.query<
+      {
+        id: string;
+        orderNumber: string | null;
+        vehicleNumber: string | null;
+        driverName: string | null;
+        driverContact: string | null;
+        transportFee: string | null;
+        status: string | null;
+        unloadingAddressDetail: string | null;
+        salesUnloadingAddressRoad: string | null;
+        salesUnloadingAddressJibun: string | null;
+        salesUnloadingAddress: string | null;
+        salesUnloadingAddressDetail: string | null;
+        loadingContainerTypes: string | null;
+      }[]
+    >(
+      `SELECT
+        d.sd_id::text AS id,
+        d.sd_order_number AS "orderNumber",
+        d.sd_vehicle_number AS "vehicleNumber",
+        d.sd_driver_name AS "driverName",
+        d.sd_driver_contact AS "driverContact",
+        d.sd_transport_fee AS "transportFee",
+        d.sd_status AS status,
+        d.sd_unloading_address_detail AS "unloadingAddressDetail",
+        s.sa_unloading_address_road AS "salesUnloadingAddressRoad",
+        s.sa_unloading_address_jibun AS "salesUnloadingAddressJibun",
+        s.sa_unloading_address AS "salesUnloadingAddress",
+        s.sa_unloading_address_detail AS "salesUnloadingAddressDetail",
+        (
+          SELECT string_agg(DISTINCT UPPER(TRIM(t.resolved_type)), ',' ORDER BY UPPER(TRIM(t.resolved_type)))
+          FROM (
+            SELECT COALESCE(
+              NULLIF(TRIM(li.sdli_actual_container_type), ''),
+              NULLIF(TRIM(li.sdli_work_container_type), ''),
+              NULLIF(TRIM(li.sdli_request_container_type), ''),
+              NULLIF(TRIM(si.si_container_type), ''),
+              'CONTAINER'
+            ) AS resolved_type
+            FROM tb_sales_delivery_loading_item li
+            INNER JOIN tb_sales_item si ON si.si_id = li.sdli_sales_item_id
+            WHERE li.sdli_sales_delivery_id = d.sd_id
+              AND COALESCE(si.si_status, '') != 'SALES_ITEM_CANCELLED'
+            UNION
+            SELECT COALESCE(NULLIF(TRIM(si2.si_container_type), ''), 'CONTAINER') AS resolved_type
+            FROM tb_sales_item si2
+            WHERE si2.sa_id = d.sd_sales_id
+              AND COALESCE(si2.si_status, '') != 'SALES_ITEM_CANCELLED'
+          ) t
+          WHERE TRIM(t.resolved_type) != ''
+        ) AS "loadingContainerTypes"
+      FROM tb_sales_delivery d
+      INNER JOIN tb_sales s ON s.sa_id = d.sd_sales_id
+      WHERE d.sd_deleted_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM tb_sales_item si
+          WHERE si.sa_id = d.sd_sales_id
+            AND COALESCE(si.si_status, '') != 'SALES_ITEM_CANCELLED'
+        )
+        AND (
+          TRIM(COALESCE(d.sd_vehicle_number, '')) != ''
+          OR TRIM(COALESCE(d.sd_driver_name, '')) != ''
+          OR TRIM(COALESCE(d.sd_driver_contact, '')) != ''
+        )
+        ${searchClause}
+      ORDER BY d.sd_created_at DESC`,
+      params,
+    );
+
+    const rowList = Array.isArray(rows) ? rows : [];
+
+    const groupMap = new Map<string, DriverDeliveryGroupDto>();
+
+    for (const row of rowList) {
+      const vehicleNumber = (row.vehicleNumber ?? '').trim();
+      const driverName = (row.driverName ?? '').trim();
+      const driverContact = (row.driverContact ?? '').trim();
+      const key = this.buildDriverGroupKeyFromFields(vehicleNumber, driverName, driverContact);
+
+      const summary: DriverDeliverySummaryDto = {
+        id: row.id,
+        orderNumber: row.orderNumber?.trim() || null,
+        vehicleNumber: vehicleNumber || null,
+        driverName: driverName || null,
+        driverContact: driverContact || null,
+        transportFee:
+          row.transportFee != null && row.transportFee !== ''
+            ? Number(row.transportFee)
+            : null,
+        status: row.status ?? null,
+        loadingContainerTypes: row.loadingContainerTypes?.trim() || null,
+        unloadingAddressDetail: row.unloadingAddressDetail?.trim() || null,
+        sales: {
+          unloadingAddressRoad: row.salesUnloadingAddressRoad?.trim() || null,
+          unloadingAddressJibun: row.salesUnloadingAddressJibun?.trim() || null,
+          unloadingAddress: row.salesUnloadingAddress?.trim() || null,
+          unloadingAddressDetail: row.salesUnloadingAddressDetail?.trim() || null,
+        },
+      };
+
+      const fee = summary.transportFee != null && !Number.isNaN(summary.transportFee)
+        ? summary.transportFee
+        : 0;
+
+      let group = groupMap.get(key);
+      if (!group) {
+        group = {
+          key,
+          vehicleNumber,
+          driverName,
+          driverContact,
+          label: this.buildDriverGroupLabel(vehicleNumber, driverName, driverContact),
+          deliveryCount: 0,
+          transportFeeSum: 0,
+          deliveries: [],
+        };
+        groupMap.set(key, group);
+      }
+      group.deliveryCount += 1;
+      group.transportFeeSum += fee;
+      group.deliveries.push(summary);
+    }
+
+    const groups = Array.from(groupMap.values()).sort((a, b) =>
+      a.label.localeCompare(b.label, 'ko'),
+    );
+
+    return {
+      groups,
+      totalDeliveries: rowList.length,
+      totalDrivers: groups.length,
     };
   }
 

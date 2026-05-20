@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { Suspense } from 'react';
 import { ColumnDef } from '@tanstack/react-table';
-import { Eye, EyeOff, Filter } from 'lucide-react';
+import { Eye, EyeOff, Filter, Download } from 'lucide-react';
 import { AppLayout } from '@/components/layout/app-layout';
 import { auth, User } from '@/lib/auth';
 import { DataTable } from '@/components/ui/data-table';
@@ -78,6 +78,8 @@ function InboundConfirmedPageContent() {
   const [sortOrder, setSortOrder] = React.useState<'asc' | 'desc'>('asc');
   const [selectedWarehouseValues, setSelectedWarehouseValues] = React.useState<Set<string>>(new Set());
   const lastWarehouseOptionsLength = React.useRef(0);
+  const [selectedDestinationValues, setSelectedDestinationValues] = React.useState<Set<string>>(new Set());
+  const lastDestinationOptionsLength = React.useRef(0);
   const isMobile = useIsMobile();
 
   // 코드 마스터 조회
@@ -87,6 +89,17 @@ function InboundConfirmedPageContent() {
   const { data: packingCodes = [] } = useCodesByCategory('PACKING_TYPE');
   const { data: currencyCodes = [] } = useCodesByCategory('CURRENCY');
   const { data: warehouses = [] } = useWarehouses({ status: true });
+  const destinationCodes = useCodesByCategory('DESTINATION_PORT');
+  const resolveDestinationLabel = React.useCallback(
+    (code?: string | null) => {
+      if (!code) return '-';
+      const destination = destinationCodes.data?.find(
+        (c) => c.value === code || c.name === code,
+      );
+      return destination?.name || code;
+    },
+    [destinationCodes.data],
+  );
 
   // 창고 필터 옵션 (tb_warehouse 기준: 미지정 + 창고명)
   const warehouseFilterOptions = React.useMemo(() => {
@@ -184,6 +197,43 @@ function InboundConfirmedPageContent() {
     return Array.from(codeSet).sort();
   }, [allTradeOrdersForProducts]);
 
+  const destinationFilterOptions = React.useMemo(() => {
+    const keySet = new Set<string>();
+    allTradeOrdersForProducts.forEach((order) => {
+      const raw =
+        order.finalDestinationCode?.trim() ||
+        order.destinationCode?.trim() ||
+        '';
+      keySet.add(raw ? raw : '__none__');
+    });
+    const keys = Array.from(keySet).sort((a, b) => {
+      const labelA = a === '__none__' ? '미지정' : resolveDestinationLabel(a);
+      const labelB = b === '__none__' ? '미지정' : resolveDestinationLabel(b);
+      return String(labelA).localeCompare(String(labelB), 'ko');
+    });
+    return keys.map((value) => ({
+      value,
+      label: value === '__none__' ? '미지정' : resolveDestinationLabel(value),
+    }));
+  }, [allTradeOrdersForProducts, resolveDestinationLabel]);
+
+  const destinationOptionsLength = destinationFilterOptions.length;
+  React.useEffect(() => {
+    const len = destinationOptionsLength;
+    if (len === 0) return;
+    const prevLen = lastDestinationOptionsLength.current;
+    lastDestinationOptionsLength.current = len;
+    setSelectedDestinationValues((prev) => {
+      const isFirstLoad = prev.size === 0;
+      const wasAllSelected = prev.size === prevLen;
+      if (isFirstLoad || wasAllSelected) {
+        return new Set(destinationFilterOptions.map((o) => o.value));
+      }
+      return prev;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destinationOptionsLength]);
+
   // 상품 필터: 전체 선택이면 미전달, 기본값 적용 전 빈 Set이면 미전달, 0개 선택이면 빈 배열
   const productsParam = React.useMemo(() => {
     if (availableProductCodes.length === 0 || selectedProducts.size === availableProductCodes.length) {
@@ -211,7 +261,7 @@ function InboundConfirmedPageContent() {
     }
   }, [availableProductCodes]);
 
-  // ETA 기간 + 창고 필터링
+  // ETA 기간 + 창고 + 도착지 필터링
   const filteredOrders = React.useMemo(() => {
     let filtered = tradeOrders;
 
@@ -224,6 +274,20 @@ function InboundConfirmedPageContent() {
         const wh = order.confirmedInbound?.warehouse ?? null;
         const raw = wh == null || wh === '' ? '__none__' : wh.trim();
         return selectedWarehouseValues.has(raw);
+      });
+    }
+
+    if (selectedDestinationValues.size < destinationFilterOptions.length) {
+      if (selectedDestinationValues.size === 0) {
+        return [];
+      }
+      filtered = filtered.filter((order) => {
+        const raw =
+          order.finalDestinationCode?.trim() ||
+          order.destinationCode?.trim() ||
+          '';
+        const key = raw ? raw : '__none__';
+        return selectedDestinationValues.has(key);
       });
     }
 
@@ -256,7 +320,15 @@ function InboundConfirmedPageContent() {
     }
 
     return filtered;
-  }, [tradeOrders, etaStartDate, etaEndDate, selectedWarehouseValues, warehouseFilterOptions.length]);
+  }, [
+    tradeOrders,
+    etaStartDate,
+    etaEndDate,
+    selectedWarehouseValues,
+    warehouseFilterOptions.length,
+    selectedDestinationValues,
+    destinationFilterOptions.length,
+  ]);
 
   /** TradeOrder에서 정렬용 값 추출 (컬럼 accessorKey와 일치) */
   const getSortValue = React.useCallback((order: TradeOrder, key: string): string | number | null => {
@@ -268,6 +340,7 @@ function InboundConfirmedPageContent() {
     if (key === 'gradeCode') return (order.gradeCode ?? order.containers?.[0]?.tradeGrade ?? '') as string;
     if (key === 'salesGrade') return (order.containers?.[0]?.salesGrade ?? '') as string;
     if (key === 'destinationName') return (order.destinationName ?? order.finalDestinationName ?? '') as string;
+    if (key === 'customsDate') return (order.customsDate ?? '') as string;
     if (key === 'igodate') return (order.confirmedInbound?.igodate ?? '') as string;
     if (key === 'quarantineDate') return (order.confirmedInbound?.quarantineDate ?? '') as string;
     if (key === 'dtDate') return (order.confirmedInbound?.dtDate ?? '') as string;
@@ -290,7 +363,7 @@ function InboundConfirmedPageContent() {
   const sortedOrders = React.useMemo(() => {
     const arr = [...filteredOrders];
     const isDate = [
-      'etaDate', 'igodate', 'quarantineDate', 'dtDate', 'orderDate', 'createdAt', 'updatedAt',
+      'etaDate', 'customsDate', 'igodate', 'quarantineDate', 'dtDate', 'orderDate', 'createdAt', 'updatedAt',
     ].includes(sortBy);
     const isNum = [
       'containerCount',
@@ -599,6 +672,13 @@ function InboundConfirmedPageContent() {
       size: 120,
     },
     {
+      accessorKey: 'customsDate',
+      header: '통관일',
+      cell: ({ row }) => <div className="text-sm">{formatDate(row.original.customsDate)}</div>,
+      meta: { headerLabel: '통관일' },
+      size: 110,
+    },
+    {
       accessorKey: 'igodate',
       header: '이고',
       cell: ({ row }) => {
@@ -728,23 +808,158 @@ function InboundConfirmedPageContent() {
     },
   ], [getCodeName, salesGradeCodes, warehouses, excludeActionOrderId, handleExcludeOrderFromList]);
 
-  const destinationCodes = useCodesByCategory('DESTINATION_PORT');
-  const resolveDestinationLabel = React.useCallback(
-    (code?: string | null) => {
-      if (!code) return '-';
-      const destination = destinationCodes.data?.find(
-        (c) => c.value === code || c.name === code
-      );
-      return destination?.name || code;
-    },
-    [destinationCodes.data]
-  );
-
   const paginatedOrders = React.useMemo(() => {
     const start = (page - 1) * pageSize;
     const end = start + pageSize;
     return sortedOrders.slice(start, end);
   }, [sortedOrders, page, pageSize]);
+
+  const handleDownloadCsv = React.useCallback(() => {
+    const escapeCsv = (val: string): string => {
+      const s = String(val ?? '');
+      if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+        return `"${s.replace(/"/g, '""')}"`;
+      }
+      return s;
+    };
+    const headers = [
+      '수출사',
+      '수출국',
+      '상품명',
+      'BL',
+      'BK',
+      '컨 수',
+      '판매',
+      '예약',
+      '가용재고',
+      '등급(무역)',
+      '등급(영업)',
+      '패킹',
+      '단가',
+      '도착지',
+      '창고',
+      'ETA',
+      '통관일',
+      '이고',
+      '검역',
+      'DT',
+      '확정 환율',
+      '확정 원가',
+      '비고',
+    ];
+    const rows = sortedOrders.map((order) => {
+      const stock = getInboundOrderContainerStockColumns(order);
+      const n = stock.containerCount;
+      const containerCountStr = n <= 0 ? '-' : String(n);
+      const soldText =
+        stock.soldContainerEquiv > 0.0001
+          ? stock.soldContainerEquiv.toLocaleString('ko-KR', { minimumFractionDigits: 0, maximumFractionDigits: 1 })
+          : '-';
+      const reservedText =
+        stock.reservedContainerEquiv > 0.0001
+          ? stock.reservedContainerEquiv.toLocaleString('ko-KR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+          : '-';
+      const availableText = stock.availableContainerEquiv.toLocaleString('ko-KR', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+      });
+      const gradeCode = order.gradeCode ?? order.containers?.[0]?.tradeGrade ?? null;
+      const gradeTrade = (getCodeName('TRADE_GRADE', gradeCode) || gradeCode || '-').toString();
+      const salesGrade = order.containers?.[0]?.salesGrade ?? null;
+      const gradeSales = (salesGradeCodes.find((c) => c.value === salesGrade)?.name || salesGrade || '-').toString();
+      const containers = order.containers ?? [];
+      const packingVals = containers.length > 0
+        ? containers.map((c) => c.packingType ?? order.packingType).filter(Boolean)
+        : [order.packingType].filter(Boolean);
+      const packingText =
+        [...new Set(packingVals.map((code) => getCodeName('PACKING_TYPE', code) || code))].join(', ') || '-';
+      const seen = new Set<string>();
+      const priceParts: string[] = [];
+      if (containers.length > 0) {
+        containers.forEach((c) => {
+          const currency = c.currency ?? order.currencyCode;
+          const unitPrice = c.unitPrice ?? order.unitPrice;
+          if (unitPrice != null) {
+            const currencyName = getCodeName('CURRENCY', currency) || currency || '';
+            const price = Number(unitPrice);
+            const formatted =
+              price % 1 === 0
+                ? price.toLocaleString('ko-KR')
+                : price.toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const key = currencyName ? `${currencyName} ${formatted}` : formatted;
+            if (!seen.has(key)) {
+              seen.add(key);
+              priceParts.push(key);
+            }
+          }
+        });
+      } else if (order.unitPrice != null) {
+        const currencyName = getCodeName('CURRENCY', order.currencyCode) || order.currencyCode || '';
+        const price = Number(order.unitPrice);
+        const formatted =
+          price % 1 === 0
+            ? price.toLocaleString('ko-KR')
+            : price.toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        priceParts.push(currencyName ? `${currencyName} ${formatted}` : formatted);
+      }
+      const unitPriceText = priceParts.length > 0 ? priceParts.join(', ') : '-';
+      const dest = order.destinationName || order.finalDestinationName || '-';
+      const wh = order.confirmedInbound?.warehouse;
+      const whName = wh
+        ? warehouses.find((w) => w.name === wh || w.id.toString() === wh)?.name ?? wh
+        : '-';
+      const inbound = order.confirmedInbound;
+      const exVal = inbound?.comparisonExchangeRate ?? inbound?.appliedExchangeRate ?? inbound?.dayExchangeRate;
+      const exText = exVal == null ? '-' : parseFloat(Number(exVal).toFixed(6)).toString();
+      const purchaseCost = inbound?.purchaseCost;
+      const pcText =
+        purchaseCost == null || !Number.isFinite(Number(purchaseCost))
+          ? '-'
+          : Number(purchaseCost).toLocaleString('ko-KR', { maximumFractionDigits: 2 });
+      const salesNotes = order.salesNotes?.trim();
+      const tradeNotes = order.notes?.trim();
+      const notesText =
+        [tradeNotes && `무역비고: ${tradeNotes}`, salesNotes && `영업비고: ${salesNotes}`].filter(Boolean).join(' | ') ||
+        '-';
+
+      return [
+        order.exporterName || '-',
+        order.exportCountryName || '-',
+        order.productName || '-',
+        order.bl || '-',
+        order.bk || '-',
+        containerCountStr,
+        soldText,
+        reservedText,
+        availableText,
+        gradeTrade,
+        gradeSales,
+        packingText,
+        unitPriceText,
+        dest,
+        whName || '-',
+        formatDate(order.etaDate),
+        formatDate(order.customsDate),
+        formatDate(order.confirmedInbound?.igodate),
+        formatDate(order.confirmedInbound?.quarantineDate),
+        formatDate(order.confirmedInbound?.dtDate),
+        exText,
+        pcText,
+        notesText,
+      ]
+        .map(escapeCsv)
+        .join(',');
+    });
+    const bom = '\uFEFF';
+    const csv = bom + headers.map(escapeCsv).join(',') + '\n' + rows.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `입고확정_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [sortedOrders, getCodeName, salesGradeCodes, warehouses]);
 
   return (
     <AppLayout user={user}>
@@ -756,6 +971,10 @@ function InboundConfirmedPageContent() {
               입고 확정 데이터가 입력된 주문(BL) 정보를 조회합니다.
             </p>
           </div>
+          <Button variant="outline" size="sm" onClick={handleDownloadCsv} className="shrink-0">
+            <Download className="mr-2 h-4 w-4" />
+            CSV 다운로드
+          </Button>
         </div>
 
         <DataTable
@@ -928,6 +1147,71 @@ function InboundConfirmedPageContent() {
                           />
                           <Label
                             htmlFor={`warehouse-filter-${opt.value}`}
+                            className="text-sm font-medium cursor-pointer flex-1 truncate"
+                          >
+                            {opt.label}
+                          </Label>
+                        </div>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="whitespace-nowrap text-sm font-medium text-muted-foreground">도착지</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-8 w-40 justify-start">
+                      <Filter className="mr-2 h-4 w-4" />
+                      {destinationFilterOptions.length === 0
+                        ? '전체'
+                        : selectedDestinationValues.size === destinationFilterOptions.length
+                          ? '전체'
+                          : selectedDestinationValues.size === 0
+                            ? '선택 안됨'
+                            : `${selectedDestinationValues.size}개 선택됨`}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 p-3 max-h-[28rem] overflow-y-auto" align="start">
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2 cursor-pointer hover:bg-muted/50 p-2 rounded">
+                        <Checkbox
+                          id="inbound-confirmed-destination-filter-all"
+                          checked={
+                            destinationFilterOptions.length === 0 ||
+                            selectedDestinationValues.size === destinationFilterOptions.length
+                          }
+                          onCheckedChange={(checked: boolean) => {
+                            if (checked) {
+                              setSelectedDestinationValues(new Set(destinationFilterOptions.map((o) => o.value)));
+                            } else {
+                              setSelectedDestinationValues(new Set());
+                            }
+                            setPage(1);
+                          }}
+                        />
+                        <Label htmlFor="inbound-confirmed-destination-filter-all" className="text-sm font-medium cursor-pointer flex-1">
+                          전체
+                        </Label>
+                      </div>
+                      {destinationFilterOptions.map((opt) => (
+                        <div
+                          key={opt.value}
+                          className="flex items-center space-x-2 cursor-pointer hover:bg-muted/50 p-2 rounded"
+                        >
+                          <Checkbox
+                            id={`inbound-confirmed-destination-filter-${encodeURIComponent(opt.value)}`}
+                            checked={selectedDestinationValues.has(opt.value)}
+                            onCheckedChange={(checked: boolean) => {
+                              const next = new Set(selectedDestinationValues);
+                              if (checked) next.add(opt.value);
+                              else next.delete(opt.value);
+                              setSelectedDestinationValues(next);
+                              setPage(1);
+                            }}
+                          />
+                          <Label
+                            htmlFor={`inbound-confirmed-destination-filter-${encodeURIComponent(opt.value)}`}
                             className="text-sm font-medium cursor-pointer flex-1 truncate"
                           >
                             {opt.label}

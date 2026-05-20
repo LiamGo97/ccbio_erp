@@ -199,17 +199,19 @@ export function InboundPendingDetailDrawer({
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             </div>
           ) : !data ? (
-            <div className="flex items-center justify-center h-32 text-muted-foreground">
-              데이터를 불러올 수 없습니다.
+            <div className="flex flex-col items-center justify-center h-32 text-muted-foreground gap-2">
+              <span>데이터를 불러올 수 없습니다.</span>
             </div>
           ) : (
-            <TradeOrderDetailContent 
-              data={data} 
-              showDocumentsInfo={true} 
-              gradeDisplayMode="both"
-              onEditSalesGrade={onEditSalesGrade}
-              containerNumberColumn="sequence"
-            />
+            <>
+              <TradeOrderDetailContent
+                data={data}
+                showDocumentsInfo={true}
+                gradeDisplayMode="both"
+                onEditSalesGrade={onEditSalesGrade}
+                containerNumberColumn="sequence"
+              />
+            </>
           )}
         </div>
 

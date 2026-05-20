@@ -96,6 +96,10 @@ export class Sales {
   @Column({ name: 'sa_advance_payment_amount', type: 'numeric', precision: 16, scale: 2, nullable: true })
   advancePaymentAmount?: string | null;
 
+  /** 판매 비고 (운송·하차 참고) */
+  @Column({ name: 'sa_notes', type: 'text', nullable: true })
+  notes?: string | null;
+
   @CreateDateColumn({ name: 'sa_created_at' })
   createdAt!: Date;
 

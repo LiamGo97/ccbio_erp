@@ -35,6 +35,9 @@ export interface ConsultationResponse {
   notes: string | null;
   managerId: number | null;
   managerName: string | null;
+  replyStatus: string | null;
+  replyAssigneeId: number | null;
+  replyAssigneeName: string | null;
   mainProduct: string | null;
   arrivalPrice: string | null;
   operations?: ConsultationCustomerOperation[];

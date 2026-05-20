@@ -16,6 +16,7 @@ import { useCodesByCategory } from '@/lib/hooks/use-codes';
 import api from '@/lib/api';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { MonthPicker } from '@/components/schedules/month-picker';
 import { ArrowRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
@@ -47,6 +48,14 @@ function getThisMonthDateRange(): { from: string; to: string } {
   const from = `${year}-${String(month + 1).padStart(2, '0')}-01`;
   const lastDay = new Date(year, month + 1, 0).getDate();
   const to = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return { from, to };
+}
+
+function getMonthDateRange(ym: string): { from: string; to: string } {
+  const [year, month] = ym.split('-').map(Number);
+  const from = `${year}-${String(month).padStart(2, '0')}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const to = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
   return { from, to };
 }
 
@@ -347,10 +356,21 @@ export default function DashboardPage() {
 
   const isLoadingReceivableWarnings = receivableWarningStatusResults.some((q) => q.isLoading);
 
-  const currentMonth = new Date().getMonth() + 1; // 1~12
+  const [etaMonth, setEtaMonth] = useState<string>(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+
+  const selectedMonth = useMemo(() => {
+    const [, m] = etaMonth.split('-').map(Number);
+    return m >= 1 && m <= 12 ? m : new Date().getMonth() + 1;
+  }, [etaMonth]);
 
   // 입고 예정 - 물류관리(http://localhost:3000/logistics/management/)와 동일한 조건
-  const { from: etaFrom, to: etaTo } = getThisMonthDateRange();
+  const { from: etaFrom, to: etaTo } = useMemo(
+    () => (etaMonth ? getMonthDateRange(etaMonth) : getThisMonthDateRange()),
+    [etaMonth],
+  );
   const { data: etaOrdersRaw = [], isLoading: etaLoading } = useTradeOrders({
     bookingOnly: true,
     tradeStatus: ['BOOKING', 'DOCUMENTS', 'DO', 'CUSTOMS'],
@@ -434,11 +454,22 @@ export default function DashboardPage() {
   return (
     <AppLayout user={user}>
       <div className="w-full max-w-full min-w-0 space-y-6">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">대시보드</h2>
-          <p className="text-sm text-muted-foreground sm:text-base">
-            시스템 현황을 한눈에 확인하세요
-          </p>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">대시보드</h2>
+            <p className="text-sm text-muted-foreground sm:text-base">
+              시스템 현황을 한눈에 확인하세요
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Label className="text-sm font-medium whitespace-nowrap">입고 예정 월</Label>
+            <MonthPicker
+              value={etaMonth}
+              onChange={(v) => setEtaMonth(v ?? '')}
+              placeholder="월 선택"
+              className="w-[140px]"
+            />
+          </div>
         </div>
 
         <div className="flex w-full min-w-0 flex-col gap-6">
@@ -516,7 +547,7 @@ export default function DashboardPage() {
           <Card className="w-full min-w-0 h-full min-h-0 py-4 gap-4">
             <CardHeader className="gap-1.5">
               <CardTitle className="text-lg flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                <span>{currentMonth}월 입고 예정 - 상품별 컨테이너 수</span>
+                <span>{selectedMonth}월 입고 예정 - 상품별 컨테이너 수</span>
                 {!etaLoading ? (
                   <span className="text-sm font-normal tabular-nums text-muted-foreground">
                     (총 {etaProductChartData.totalContainers.toLocaleString('ko-KR')}개)
@@ -524,7 +555,7 @@ export default function DashboardPage() {
                 ) : null}
               </CardTitle>
               <CardDescription className="text-sm">
-                {currentMonth}월 도착 예정 상품별 컨테이너 개수
+                {selectedMonth}월 도착 예정 상품별 컨테이너 개수
               </CardDescription>
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col justify-center pt-0">
@@ -538,7 +569,7 @@ export default function DashboardPage() {
               ) : etaProductChartData.labels.length === 0 ? (
                 <div className="flex h-48 items-center justify-center">
                   <p className="text-sm text-muted-foreground text-center">
-                    {currentMonth}월 입고 예정 데이터가 없습니다.
+                    {selectedMonth}월 입고 예정 데이터가 없습니다.
                   </p>
                 </div>
               ) : (
@@ -725,9 +756,9 @@ export default function DashboardPage() {
           <Card className="w-full min-w-0">
           <CardHeader className="flex flex-row items-center justify-between py-4">
             <div>
-              <CardTitle className="text-lg">{currentMonth}월 입고 예정</CardTitle>
+              <CardTitle className="text-lg">{selectedMonth}월 입고 예정</CardTitle>
               <CardDescription className="text-sm">
-                {currentMonth}월 ETA 도착 예정 (물류관리 기준)
+                {selectedMonth}월 ETA 도착 예정 (물류관리 기준)
               </CardDescription>
             </div>
             <Link
@@ -748,7 +779,7 @@ export default function DashboardPage() {
               </div>
             ) : etaOrders.length === 0 ? (
               <p className="py-6 text-center text-sm text-muted-foreground">
-                {currentMonth}월 입고 예정이 없습니다.
+                {selectedMonth}월 입고 예정이 없습니다.
               </p>
             ) : (
               <div className="overflow-x-auto max-h-[420px] overflow-y-auto">

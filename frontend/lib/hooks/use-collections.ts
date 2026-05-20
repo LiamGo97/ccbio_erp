@@ -10,12 +10,14 @@ export interface CollectionListItem {
   customerName: string | null;
   companyName: string | null;
   ceo: string | null;
+  phone?: string | null;
   collectionAmount: number;
   collectionDate: string;
   collectionMethod: string | null;
   notes: string | null;
   isPrepayment: boolean;
   createdAt: string;
+  smsStatus?: string | null;
 }
 
 export type CollectionListSortField =
@@ -42,6 +44,8 @@ export interface GetCollectionsParams {
   prepaymentFilter?: CollectionPrepaymentFilter;
   sortBy?: CollectionListSortField;
   sortOrder?: 'asc' | 'desc';
+  /** SMS 발송 상태 다중 필터 (전체 선택 시 생략) */
+  smsStatuses?: string[];
 }
 
 export interface GetCollectionsResponse {
@@ -54,11 +58,33 @@ export interface GetCollectionsResponse {
   totalCollectionAmount: number;
 }
 
+function buildCollectionsQueryString(params?: GetCollectionsParams): string {
+  const sp = new URLSearchParams();
+  if (!params) return '';
+  if (params.page != null) sp.set('page', String(params.page));
+  if (params.limit != null) sp.set('limit', String(params.limit));
+  if (params.customerId) sp.set('customerId', params.customerId);
+  if (params.search?.trim()) sp.set('search', params.search.trim());
+  if (params.startDate) sp.set('startDate', params.startDate);
+  if (params.endDate) sp.set('endDate', params.endDate);
+  if (params.prepaymentFilter) sp.set('prepaymentFilter', params.prepaymentFilter);
+  if (params.sortBy) sp.set('sortBy', params.sortBy);
+  if (params.sortOrder) sp.set('sortOrder', params.sortOrder);
+  if (params.smsStatuses !== undefined) {
+    if (params.smsStatuses.length === 0) sp.append('smsStatuses', '');
+    else params.smsStatuses.forEach((s) => sp.append('smsStatuses', s));
+  }
+  return sp.toString();
+}
+
 export function useCollections(params?: GetCollectionsParams) {
   return useQuery<GetCollectionsResponse>({
     queryKey: ['collections', params],
     queryFn: async () => {
-      const response = await api.get<GetCollectionsResponse>('/receivables/collections', { params });
+      const qs = buildCollectionsQueryString(params);
+      const response = await api.get<GetCollectionsResponse>(
+        `/receivables/collections${qs ? `?${qs}` : ''}`,
+      );
       return response.data;
     },
   });

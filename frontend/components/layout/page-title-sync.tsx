@@ -35,7 +35,13 @@ const PATH_TITLES: Record<string, string> = {
   'sales/product-reservations': '판매예약',
   'sales/product-reservations-sheet': '판매예약',
   'sales/quotation-sheet': '견적서',
+  'sales/management-v2': '판매관리 (신규)',
+  'sales/management-v2/sales': '판매관리 (신규)',
+  'sales/inventory/pending': '입고예정재고',
+  'sales/inventory/confirmed': '입고확정재고',
   'sales/transport-management/transport': '운송관리',
+  'sales/transport-management/by-driver': '기사별 운송',
+  'sales/transport-management/mismatch': '판매·운송 불일치',
   // 재무
   finance: '재무',
   'finance/payment-management': '결제관리',

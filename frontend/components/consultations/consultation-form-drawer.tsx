@@ -145,6 +145,8 @@ const defaultValues: CreateConsultationPayload = {
   hasHandling: false,
   hasUnloading: false,
   managerId: null,
+  replyStatus: '',
+  replyAssigneeId: null,
   startedAt: '',
   endedAt: '',
   mainProduct: '',
@@ -194,6 +196,8 @@ export function ConsultationFormDrawer({
   const typeValue = watch('type') ?? '__none__';
   const sourceValue = watch('source') ?? '__none__';
   const inOutValue = watch('inOut') || (mode === 'create' ? 'IN' : '__none__');
+  const replyStatusWatch = watch('replyStatus');
+  const replyAssigneeIdWatch = watch('replyAssigneeId');
   const customerPostalCodeValue = watch('customerPostalCode');
   const customerAddressValue = watch('customerAddress');
   const customerAddressDetailValue = watch('addressDetail');
@@ -216,6 +220,8 @@ export function ConsultationFormDrawer({
     register('inOut');
     register('startedAt');
     register('endedAt');
+    register('replyStatus');
+    register('replyAssigneeId');
   }, [register]);
 
   // 전화번호 포맷터 (한국형)
@@ -243,6 +249,7 @@ export function ConsultationFormDrawer({
   const { data: operationSubCodes } = useCodesByCategory('OPERATION_SUBTYPE');
   const { data: feedingCodes } = useCodesByCategory('FEEDING_METHOD');
   const { data: chamchamCodes } = useCodesByCategory('CHAMCHAM_STATUS');
+  const { data: replyStatusCodes } = useCodesByCategory('CONSULTATION_REPLY_STATUS');
   const { data: consultationTypeCodes } = useCodeMastersByGroup('CONSULTATION_TYPE');
   const { data: consultationSourceCodes } = useCodeMastersByGroup('CONSULTATION_SOURCE');
   const { data: consultationInOutCodes } = useCodeMastersByGroup('CONSULTATION_INOUT');
@@ -250,7 +257,16 @@ export function ConsultationFormDrawer({
   const { data: salesGradeCodes } = useCodeMastersByGroup('SALES_GRADE');
   const { data: packingTypeCodes } = useCodeMastersByGroup('PACKING_TYPE');
   const { data: usersData } = useUsers({ limit: 1000 }); // 담당자 검색용
-  
+  const { data: salesUsersForReplyResponse } = useUsers({
+    page: 1,
+    limit: 100,
+    status: 'active',
+    sortBy: 'name',
+    sortOrder: 'asc',
+    roleCode: 'ROLE_SALES',
+  });
+  const salesUsersForReply = salesUsersForReplyResponse?.data ?? [];
+
   // 제품 분류 및 제품
   const { data: productCategories } = useCodeMastersByGroup('PRODUCT_CATEGORY');
   const { data: allProducts } = useCodeMastersByGroup('PRODUCT'); // 모든 제품
@@ -1215,6 +1231,8 @@ export function ConsultationFormDrawer({
         mainProduct: consultation.mainProduct ?? '',
         arrivalPrice: consultation.arrivalPrice ?? '',
         managerId: consultation.managerId,
+        replyStatus: consultation.replyStatus ?? '',
+        replyAssigneeId: consultation.replyAssigneeId ?? null,
         startedAt: consultation.startedAt ?? '',
         endedAt: consultation.endedAt ?? '',
       });
@@ -1787,6 +1805,12 @@ export function ConsultationFormDrawer({
       next.requestedWeight = undefined;
     }
     
+    const rs = typeof next.replyStatus === 'string' ? next.replyStatus.trim() : '';
+    next.replyStatus = rs.length > 0 ? rs : null;
+    const ra = next.replyAssigneeId;
+    next.replyAssigneeId =
+      ra != null && !Number.isNaN(Number(ra)) && Number(ra) > 0 ? Number(ra) : null;
+
     if (mode === 'create') {
       if (currentUserId != null) {
         const parsed = Number(currentUserId);
@@ -3174,6 +3198,71 @@ export function ConsultationFormDrawer({
                       placeholder="상담 내용을 입력하세요"
                       {...register('notes')}
                     />
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="reply-progress-status">답변 진행상태</Label>
+                        <Select
+                          value={
+                            (replyStatusWatch && String(replyStatusWatch).trim()) || '__none__'
+                          }
+                          onValueChange={(v) =>
+                            setValue('replyStatus', v === '__none__' ? '' : v, { shouldDirty: true })
+                          }
+                        >
+                          <SelectTrigger id="reply-progress-status" className="w-full">
+                            <SelectValue placeholder="선택하세요" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">선택 안함</SelectItem>
+                            {(replyStatusCodes ?? [])
+                              .slice()
+                              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+                              .map((c) => {
+                                const val = (c.value ?? c.name ?? '').trim();
+                                if (!val) return null;
+                                const label = (c.name ?? c.value ?? val).trim() || val;
+                                return (
+                                  <SelectItem key={c.id} value={val}>
+                                    {label}
+                                  </SelectItem>
+                                );
+                              })}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="reply-assignee">답변 담당자</Label>
+                        <Select
+                          value={
+                            replyAssigneeIdWatch != null && !Number.isNaN(Number(replyAssigneeIdWatch))
+                              ? String(replyAssigneeIdWatch)
+                              : '__none__'
+                          }
+                          onValueChange={(v) =>
+                            setValue(
+                              'replyAssigneeId',
+                              v === '__none__' ? null : Number(v),
+                              { shouldDirty: true },
+                            )
+                          }
+                        >
+                          <SelectTrigger id="reply-assignee" className="w-full">
+                            <SelectValue placeholder="영업팀원 선택" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">선택 안함</SelectItem>
+                            {salesUsersForReply.map((u) => (
+                              <SelectItem key={u.id} value={String(u.id)}>
+                                {u.name || u.email}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="hidden md:block" />
+                      <div className="hidden md:block" />
                   </div>
 
                   {/* 배송지 */}

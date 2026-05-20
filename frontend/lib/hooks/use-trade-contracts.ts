@@ -430,6 +430,228 @@ export interface UseFinanceInventoryConfirmedByBlParams {
   dateTo?: string;
 }
 
+export interface SalesInventoryPendingByBlPackingRow {
+  rowKey: string;
+  orderId: string;
+  bl: string | null;
+  bk: string | null;
+  product: string | null;
+  productName: string | null;
+  salesGrade: string | null;
+  packingType: string | null;
+  packingName: string | null;
+  inboundWarehouseName: string | null;
+  inboundWarehouseMixed: boolean;
+  inboundIgodate: string | null;
+  inboundIgodateMixed: boolean;
+  inboundQuarantineDate: string | null;
+  inboundQuarantineDateMixed: boolean;
+  inboundCustomsScheduledDate: string | null;
+  inboundDtDate: string | null;
+  customsScheduledMixed: boolean;
+  etaDate: string | null;
+  etaDateMixed: boolean;
+  destinationName: string | null;
+  destinationMixed: boolean;
+  inventoryStatus: string | null;
+  inventoryStatusMixed: boolean;
+  containerCount: number;
+  totalBales: number;
+  totalKg: number;
+  availableBales: number;
+  availableKg: number;
+  soldBales: number;
+  soldKg: number;
+  firstContainerId: string;
+  containerIds: string[];
+}
+
+export interface UseSalesInventoryPendingByBlPackingParams {
+  search?: string;
+  productNames?: string[];
+  includeExcluded?: boolean;
+  inventoryStatus?: string[];
+}
+
+/** 영업 입고예정 재고 — BL + 패킹 단위 집계 */
+export function useSalesInventoryPendingByBlPacking(
+  params: UseSalesInventoryPendingByBlPackingParams = {},
+) {
+  const productNamesKey =
+    params.productNames !== undefined ? params.productNames.join('\u0001') : '';
+  return useQuery({
+    queryKey: [
+      'trade-contracts',
+      'sales',
+      'inventory-pending',
+      params.search ?? '',
+      productNamesKey,
+      params.includeExcluded ?? false,
+      params.inventoryStatus ?? [],
+    ],
+    queryFn: async () => {
+      const sp = new URLSearchParams();
+      if (params.search?.trim()) sp.set('search', params.search.trim());
+      if (params.productNames !== undefined) {
+        if (params.productNames.length === 0) sp.append('productName', '');
+        else params.productNames.forEach((p) => sp.append('productName', p));
+      }
+      if (params.includeExcluded) sp.set('includeExcluded', 'true');
+      if (params.inventoryStatus?.length) sp.set('inventoryStatus', params.inventoryStatus.join(','));
+      const qs = sp.toString();
+      const response = await api.get(
+        `/trade/contracts/sales/inventory-pending${qs ? `?${qs}` : ''}`,
+      );
+      return response.data as SalesInventoryPendingByBlPackingRow[];
+    },
+  });
+}
+
+export interface SalesInventoryConfirmedByBlPackingRow {
+  rowKey: string;
+  orderId: string;
+  bl: string | null;
+  bk: string | null;
+  product: string | null;
+  productName: string | null;
+  salesGrade: string | null;
+  packingType: string | null;
+  packingName: string | null;
+  inboundWarehouseName: string | null;
+  inboundWarehouseMixed: boolean;
+  customsDate: string | null;
+  customsDateMixed: boolean;
+  inboundDtDate: string | null;
+  inboundDtDateMixed: boolean;
+  inventoryStatus: string | null;
+  inventoryStatusMixed: boolean;
+  returnStatus: string | null;
+  returnStatusName: string | null;
+  returnStatusMixed: boolean;
+  returnStatusCounts: Record<string, number>;
+  containerCount: number;
+  totalBales: number;
+  totalKg: number;
+  availableBales: number;
+  availableKg: number;
+  soldBales: number;
+  soldKg: number;
+  firstContainerId: string;
+  containerIds: string[];
+}
+
+export interface UseSalesInventoryConfirmedByBlPackingParams {
+  search?: string;
+  productNames?: string[];
+  includeExcluded?: boolean;
+  inventoryStatus?: string[];
+  returnStatus?: string[];
+}
+
+export type SalesInventoryConfirmedSalesLinkedItem = {
+  id: string;
+  sourceType: 'SALES' | 'RESERVATION' | 'SHEET';
+  salesId: string | null;
+  containerId: string;
+  containerNo: string | null;
+  customerId: string | null;
+  customerName: string | null;
+  status: string | null;
+  statusName: string | null;
+  containerType: string | null;
+  cargoBales: number;
+  cargoWeight: number;
+  salesUnitPrice: number | null;
+  reservationDate: string | null;
+  salesDate: string | null;
+  registeredByName: string | null;
+  notes: string | null;
+};
+
+export type SalesInventoryConfirmedSalesLinkedResponse = {
+  items: SalesInventoryConfirmedSalesLinkedItem[];
+  salesCount: number;
+  linkedCount: number;
+};
+
+export type UseSalesInventoryConfirmedSalesLinkedParams = {
+  containerIds: string[];
+  orderId?: string;
+  packingType?: string | null;
+};
+
+/** 영업 입고확정 재고 — 패킹 행 컨테이너에 연결된 판매·예약 항목 */
+export function useSalesInventoryConfirmedSalesLinked(
+  params: UseSalesInventoryConfirmedSalesLinkedParams,
+  enabled: boolean,
+) {
+  const containerIdsKey = params.containerIds.join(',');
+  return useQuery({
+    queryKey: [
+      'trade-contracts',
+      'sales',
+      'inventory-confirmed',
+      'sales-linked',
+      containerIdsKey,
+      params.orderId ?? '',
+      params.packingType ?? '',
+    ],
+    queryFn: async () => {
+      if (params.containerIds.length === 0 && !params.orderId) {
+        return { items: [], salesCount: 0, linkedCount: 0 } satisfies SalesInventoryConfirmedSalesLinkedResponse;
+      }
+      const response = await api.get<SalesInventoryConfirmedSalesLinkedResponse>(
+        '/trade/contracts/sales/inventory-confirmed/sales-linked',
+        {
+          params: {
+            containerIds: params.containerIds.join(','),
+            orderId: params.orderId,
+            packingType: params.packingType ?? undefined,
+          },
+        },
+      );
+      return response.data;
+    },
+    enabled: enabled && (params.containerIds.length > 0 || !!params.orderId),
+  });
+}
+
+/** 영업 입고확정 재고 — BL + 패킹 단위 집계 (기존 containers API와 분리) */
+export function useSalesInventoryConfirmedByBlPacking(
+  params: UseSalesInventoryConfirmedByBlPackingParams = {},
+) {
+  const productNamesKey =
+    params.productNames !== undefined ? params.productNames.join('\u0001') : '';
+  return useQuery({
+    queryKey: [
+      'trade-contracts',
+      'sales',
+      'inventory-confirmed',
+      params.search ?? '',
+      productNamesKey,
+      params.includeExcluded ?? false,
+      params.inventoryStatus ?? [],
+      params.returnStatus ?? [],
+    ],
+    queryFn: async () => {
+      const sp = new URLSearchParams();
+      if (params.search?.trim()) sp.set('search', params.search.trim());
+      if (params.productNames !== undefined) {
+        if (params.productNames.length === 0) sp.append('productName', '');
+        else params.productNames.forEach((p) => sp.append('productName', p));
+      }
+      if (params.includeExcluded) sp.set('includeExcluded', 'true');
+      if (params.inventoryStatus?.length) sp.set('inventoryStatus', params.inventoryStatus.join(','));
+      if (params.returnStatus?.length) sp.set('returnStatus', params.returnStatus.join(','));
+      const qs = sp.toString();
+      const response = await api.get(
+        `/trade/contracts/sales/inventory-confirmed${qs ? `?${qs}` : ''}`,
+      );
+      return response.data as SalesInventoryConfirmedByBlPackingRow[];
+    },
+  });
+}
+
 export function useFinanceInventoryConfirmedByBl(params: UseFinanceInventoryConfirmedByBlParams = {}) {
   const productNamesKey =
     params.productNames !== undefined

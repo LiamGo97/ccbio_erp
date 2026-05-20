@@ -181,6 +181,16 @@ export class CreateConsultationDto {
   @IsString()
   @MaxLength(100)
   arrivalPrice?: string;
+
+  /** tb_code 그룹 CONSULTATION_REPLY_STATUS 의 cd_value(또는 표시명과 일치 시 정규화) */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  replyStatus?: string | null;
+
+  @IsOptional()
+  @IsInt()
+  replyAssigneeId?: number | null;
 }
 
 export class ConsultationProductDto {

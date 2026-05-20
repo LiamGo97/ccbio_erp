@@ -4470,6 +4470,8 @@ ${appendedNote}`
         inboundDtDate: this.formatDate(inboundForDates?.dtDate),
         // ETA (입항 예정일) - 판매 대시보드 통관 전 재고 월별 필터용
         etaDate: order.etaDate ? this.formatDate(order.etaDate) : null,
+        /** 주문 통관일 (무역 주문 to_customs_date) — 입고확정재고 목록 등 */
+        customsDate: order.customsDate ? this.formatDate(order.customsDate) : null,
         // 단가 (계약/송장 단가)
         unitPrice: container.unitPrice != null ? Number(container.unitPrice) : null,
         // 원가 데이터 (예정 시 comparisonPurchaseCost = 입고 예정 원화 kg당, 마진 계산용)
@@ -4889,6 +4891,605 @@ ${appendedNote}`
       const kg = Number(r.availableKg ?? 0);
       return !Number.isNaN(kg) && kg !== 0;
     });
+  }
+
+  /**
+   * 영업 입고예정 재고 — BL + 패킹 단위 집계
+   * 기존 listContainers / finance API와 분리된 전용 응답 (운영 메뉴 영향 없음)
+   */
+  async listSalesInventoryPendingByBlPacking(
+    search?: string,
+    productNames?: string[],
+    includeExcluded?: boolean,
+    inventoryStatus?: string[],
+  ): Promise<
+    Array<{
+      rowKey: string;
+      orderId: string;
+      bl: string | null;
+      bk: string | null;
+      product: string | null;
+      productName: string | null;
+      salesGrade: string | null;
+      packingType: string | null;
+      packingName: string | null;
+      inboundWarehouseName: string | null;
+      inboundWarehouseMixed: boolean;
+      inboundIgodate: string | null;
+      inboundIgodateMixed: boolean;
+      inboundQuarantineDate: string | null;
+      inboundQuarantineDateMixed: boolean;
+      inboundCustomsScheduledDate: string | null;
+      inboundDtDate: string | null;
+      customsScheduledMixed: boolean;
+      etaDate: string | null;
+      etaDateMixed: boolean;
+      destinationName: string | null;
+      destinationMixed: boolean;
+      inventoryStatus: string | null;
+      inventoryStatusMixed: boolean;
+      containerCount: number;
+      totalBales: number;
+      totalKg: number;
+      availableBales: number;
+      availableKg: number;
+      soldBales: number;
+      soldKg: number;
+      firstContainerId: string;
+      containerIds: string[];
+    }>
+  > {
+    const containers = await this.listContainers(
+      'PENDING',
+      false,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      search,
+      productNames,
+      includeExcluded ?? false,
+      undefined,
+      false,
+      undefined,
+      true, // 입고예정: 판매예약(시트·판매관리) 차감 반영 → 목록 남은 수량 표시
+    );
+
+    let filtered = containers;
+    if (inventoryStatus && inventoryStatus.length > 0) {
+      filtered = filtered.filter((c) => c.inventoryStatus && inventoryStatus.includes(c.inventoryStatus));
+    }
+
+    const byBlPacking = new Map<string, typeof filtered>();
+    for (const c of filtered) {
+      const orderId = String(c.orderId ?? c.id);
+      const packingKey = (c.packingType ?? '').trim() || '__none__';
+      const key = `${orderId}::${packingKey}`;
+      if (!byBlPacking.has(key)) byBlPacking.set(key, []);
+      byBlPacking.get(key)!.push(c);
+    }
+
+    const uniqueDates = (values: (string | null | undefined)[]) => [
+      ...new Set(values.map((v) => v?.trim()).filter((d): d is string => Boolean(d))),
+    ];
+
+    const rows = Array.from(byBlPacking.entries()).map(([rowKey, list]) => {
+      const first = list[0] as (typeof filtered)[0];
+      const totalBales = list.reduce(
+        (sum, c) => sum + (Number(c.salesBales ?? c.bales ?? c.tradeBales ?? 0) || 0),
+        0,
+      );
+      const availableBales = list.reduce((sum, c) => sum + (Number(c.availableBales ?? 0) || 0), 0);
+      const soldBales = list.reduce((sum, c) => sum + (Number(c.soldBales ?? 0) || 0), 0);
+      const totalWeightMt = list.reduce((sum, c) => sum + (Number(c.weight ?? 0) || 0), 0);
+      const availableWeightMt = list.reduce((sum, c) => sum + (Number(c.availableWeight ?? 0) || 0), 0);
+      const soldWeightMt = list.reduce((sum, c) => sum + (Number(c.soldWeight ?? 0) || 0), 0);
+      const totalKg = totalWeightMt * 1000;
+      const availableKg = availableWeightMt * 1000;
+      const soldKg = soldWeightMt * 1000;
+
+      const invStatuses = [...new Set(list.map((c) => c.inventoryStatus).filter(Boolean))];
+      const warehouseNames = uniqueDates(list.map((c) => c.inboundWarehouseName));
+      const igodates = uniqueDates(list.map((c) => c.inboundIgodate));
+      const quarantineDates = uniqueDates(list.map((c) => c.inboundQuarantineDate));
+      const customsScheduledDates = uniqueDates(
+        list.map((c) => c.inboundCustomsScheduledDate ?? c.inboundDtDate),
+      );
+      const dtDates = uniqueDates(list.map((c) => c.inboundDtDate));
+      const etaDates = uniqueDates(list.map((c) => c.etaDate));
+      const destinations = uniqueDates(list.map((c) => c.destinationName));
+
+      return {
+        rowKey,
+        orderId: String(first.orderId ?? first.id),
+        bl: first.bl ?? null,
+        bk: first.bk ?? null,
+        product: (first as { product?: string | null }).product ?? null,
+        productName: first.productName ?? null,
+        salesGrade: first.salesGrade ?? null,
+        packingType: first.packingType ?? null,
+        packingName: first.packingName ?? null,
+        inboundWarehouseName: warehouseNames.length === 1 ? warehouseNames[0] : null,
+        inboundWarehouseMixed: warehouseNames.length > 1,
+        inboundIgodate: igodates.length === 1 ? igodates[0] : null,
+        inboundIgodateMixed: igodates.length > 1,
+        inboundQuarantineDate: quarantineDates.length === 1 ? quarantineDates[0] : null,
+        inboundQuarantineDateMixed: quarantineDates.length > 1,
+        inboundCustomsScheduledDate:
+          customsScheduledDates.length === 1 ? customsScheduledDates[0] : null,
+        inboundDtDate: dtDates.length === 1 ? dtDates[0] : null,
+        customsScheduledMixed: customsScheduledDates.length > 1,
+        etaDate: etaDates.length === 1 ? etaDates[0] : null,
+        etaDateMixed: etaDates.length > 1,
+        destinationName: destinations.length === 1 ? destinations[0] : null,
+        destinationMixed: destinations.length > 1,
+        inventoryStatus: invStatuses.length === 1 ? (invStatuses[0] as string) : null,
+        inventoryStatusMixed: invStatuses.length > 1,
+        containerCount: list.length,
+        totalBales,
+        totalKg,
+        availableBales,
+        availableKg,
+        soldBales,
+        soldKg,
+        firstContainerId: String(first.id),
+        containerIds: list.map((c) => String(c.id)),
+      };
+    });
+
+    return rows.filter((r) => (r.totalBales ?? 0) > 0 || (r.totalKg ?? 0) >= 0.01);
+  }
+
+  /**
+   * 영업 입고확정 재고 — BL + 패킹 단위 집계
+   * 기존 listContainers / finance API와 분리된 전용 응답 (운영 메뉴 영향 없음)
+   */
+  async listSalesInventoryConfirmedByBlPacking(
+    search?: string,
+    productNames?: string[],
+    includeExcluded?: boolean,
+    inventoryStatus?: string[],
+    returnStatus?: string[],
+  ): Promise<
+    Array<{
+      rowKey: string;
+      orderId: string;
+      bl: string | null;
+      bk: string | null;
+      product: string | null;
+      productName: string | null;
+      salesGrade: string | null;
+      packingType: string | null;
+      packingName: string | null;
+      inboundWarehouseName: string | null;
+      inboundWarehouseMixed: boolean;
+      customsDate: string | null;
+      customsDateMixed: boolean;
+      inboundDtDate: string | null;
+      inboundDtDateMixed: boolean;
+      inventoryStatus: string | null;
+      inventoryStatusMixed: boolean;
+      returnStatus: string | null;
+      returnStatusName: string | null;
+      returnStatusMixed: boolean;
+      /** 반납여부별 컨테이너 수 (0인 상태는 제외) */
+      returnStatusCounts: Record<string, number>;
+      containerCount: number;
+      totalBales: number;
+      totalKg: number;
+      availableBales: number;
+      availableKg: number;
+      soldBales: number;
+      soldKg: number;
+      firstContainerId: string;
+      /** 집계에 포함된 컨테이너 ID (상세 드로어와 목록 컨 수 일치용) */
+      containerIds: string[];
+    }>
+  > {
+    const containers = await this.listContainers(
+      'CONFIRMED',
+      false,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      search,
+      productNames,
+      includeExcluded ?? false,
+      returnStatus,
+      false,
+      undefined,
+      false, // includeSheetReservations — 입고확정재고(영업)와 동일: 시트 이중 차감 방지
+    );
+
+    let filtered = containers;
+    if (inventoryStatus && inventoryStatus.length > 0) {
+      filtered = filtered.filter((c) => c.inventoryStatus && inventoryStatus.includes(c.inventoryStatus));
+    }
+
+    const byBlPacking = new Map<string, typeof filtered>();
+    for (const c of filtered) {
+      const orderId = String(c.orderId ?? c.id);
+      const packingKey = (c.packingType ?? '').trim() || '__none__';
+      const key = `${orderId}::${packingKey}`;
+      if (!byBlPacking.has(key)) byBlPacking.set(key, []);
+      byBlPacking.get(key)!.push(c);
+    }
+
+    const rows = Array.from(byBlPacking.entries()).map(([rowKey, list]) => {
+      const first = list[0] as (typeof filtered)[0];
+      const totalBales = list.reduce(
+        (sum, c) => sum + (Number(c.salesBales ?? c.bales ?? c.tradeBales ?? 0) || 0),
+        0,
+      );
+      const availableBales = list.reduce((sum, c) => sum + (Number(c.availableBales ?? 0) || 0), 0);
+      const soldBales = list.reduce((sum, c) => sum + (Number(c.soldBales ?? 0) || 0), 0);
+      const totalWeightMt = list.reduce((sum, c) => sum + (Number(c.weight ?? 0) || 0), 0);
+      const availableWeightMt = list.reduce((sum, c) => sum + (Number(c.availableWeight ?? 0) || 0), 0);
+      const soldWeightMt = list.reduce((sum, c) => sum + (Number(c.soldWeight ?? 0) || 0), 0);
+      const totalKg = totalWeightMt * 1000;
+      const availableKg = availableWeightMt * 1000;
+      const soldKg = soldWeightMt * 1000;
+
+      const invStatuses = [...new Set(list.map((c) => c.inventoryStatus).filter(Boolean))];
+      const retStatuses = [...new Set(list.map((c) => c.returnStatus ?? 'NOT_RETURNED'))];
+      const returnStatusCounts: Record<string, number> = {};
+      for (const c of list) {
+        const code = c.returnStatus ?? 'NOT_RETURNED';
+        returnStatusCounts[code] = (returnStatusCounts[code] ?? 0) + 1;
+      }
+      const warehouseNames = [
+        ...new Set(
+          list.map((c) => c.inboundWarehouseName?.trim()).filter((n): n is string => Boolean(n)),
+        ),
+      ];
+      const customsDates = [
+        ...new Set(
+          list.map((c) => c.customsDate?.trim()).filter((d): d is string => Boolean(d)),
+        ),
+      ];
+      const dtDates = [
+        ...new Set(
+          list.map((c) => c.inboundDtDate?.trim()).filter((d): d is string => Boolean(d)),
+        ),
+      ];
+
+      return {
+        rowKey,
+        orderId: String(first.orderId ?? first.id),
+        bl: first.bl ?? null,
+        bk: first.bk ?? null,
+        product: (first as { product?: string | null }).product ?? null,
+        productName: first.productName ?? null,
+        salesGrade: first.salesGrade ?? null,
+        packingType: first.packingType ?? null,
+        packingName: first.packingName ?? null,
+        inboundWarehouseName: warehouseNames.length === 1 ? warehouseNames[0] : null,
+        inboundWarehouseMixed: warehouseNames.length > 1,
+        customsDate: customsDates.length === 1 ? customsDates[0] : null,
+        customsDateMixed: customsDates.length > 1,
+        inboundDtDate: dtDates.length === 1 ? dtDates[0] : null,
+        inboundDtDateMixed: dtDates.length > 1,
+        inventoryStatus: invStatuses.length === 1 ? (invStatuses[0] as string) : null,
+        inventoryStatusMixed: invStatuses.length > 1,
+        returnStatus: retStatuses.length === 1 ? retStatuses[0] : null,
+        returnStatusName: retStatuses.length === 1 ? (first.returnStatusName ?? null) : null,
+        returnStatusMixed: retStatuses.length > 1,
+        returnStatusCounts,
+        containerCount: list.length,
+        totalBales,
+        totalKg,
+        availableBales,
+        availableKg,
+        soldBales,
+        soldKg,
+        firstContainerId: String(first.id),
+        containerIds: list.map((c) => String(c.id)),
+      };
+    });
+
+    return rows.filter((r) => (r.totalBales ?? 0) > 0 || (r.totalKg ?? 0) >= 0.01);
+  }
+
+  /**
+   * 영업 입고확정 재고 — BL·패킹 행 컨테이너에 연결된 판매·판매예약·시트예약 목록
+   */
+  async listSalesLinkedToContainers(
+    containerIds: string[],
+    orderId?: string,
+    packingType?: string,
+  ): Promise<{
+    items: Array<{
+      id: string;
+      sourceType: 'SALES' | 'RESERVATION' | 'SHEET';
+      salesId: string | null;
+      containerId: string;
+      containerNo: string | null;
+      customerId: string | null;
+      customerName: string | null;
+      status: string | null;
+      statusName: string | null;
+      containerType: string | null;
+      cargoBales: number;
+      cargoWeight: number;
+      salesUnitPrice: number | null;
+      reservationDate: string | null;
+      salesDate: string | null;
+      registeredByName: string | null;
+      notes: string | null;
+    }>;
+    salesCount: number;
+    linkedCount: number;
+  }> {
+    type LinkedRow = {
+      id: string;
+      sourceType: 'SALES' | 'RESERVATION' | 'SHEET';
+      salesId: string | null;
+      containerId: string;
+      containerNo: string | null;
+      customerId: string | null;
+      customerName: string | null;
+      status: string | null;
+      statusName: string | null;
+      containerType: string | null;
+      cargoBales: number;
+      cargoWeight: number;
+      salesUnitPrice: number | null;
+      reservationDate: string | null;
+      salesDate: string | null;
+      registeredByName: string | null;
+      notes: string | null;
+      sortAt: number;
+    };
+
+    let ids = [...new Set(containerIds.map((id) => String(id).trim()).filter(Boolean))];
+    let containers: TradeContainer[] = [];
+
+    if (ids.length > 0) {
+      containers = await this.tradeContainerRepository.find({
+        where: { id: In(ids) },
+        relations: ['order', 'order.contract'],
+      });
+    } else if (orderId) {
+      containers = await this.tradeContainerRepository.find({
+        where: { order: { id: orderId } },
+        relations: ['order', 'order.contract'],
+      });
+      const packingKey = (packingType ?? '').trim() || '__none__';
+      containers = containers.filter((c) => {
+        const contract = c.order?.contract;
+        const p =
+          (c.packingType ?? c.order?.packingType ?? contract?.packingType ?? '').trim() || '__none__';
+        return p === packingKey;
+      });
+      ids = containers.map((c) => String(c.id));
+    }
+
+    if (ids.length === 0) {
+      return { items: [], salesCount: 0, linkedCount: 0 };
+    }
+
+    const idSet = new Set(ids);
+    const containerById = new Map(containers.map((c) => [String(c.id), c]));
+    const orderIds = [
+      ...new Set(containers.map((c) => c.order?.id).filter((id): id is string => !!id).map(String)),
+    ];
+
+    const codeCategories = ['SALES_ITEM_STATUS', 'SALES_PRICE_STAGE'];
+    const codes = await this.codeRepository.find({ where: { group: In(codeCategories) } });
+    const codeMap = new Map<string, Map<string, string>>();
+    const normalizeKey = (value: string) => value.trim().toUpperCase();
+    codes.forEach((code) => {
+      if (!code.value) return;
+      if (!codeMap.has(code.group)) codeMap.set(code.group, new Map());
+      codeMap.get(code.group)!.set(normalizeKey(code.value), code.name);
+    });
+    const getCodeName = (category: string, value?: string | null) => {
+      if (!value) return null;
+      return codeMap.get(category)?.get(normalizeKey(value)) ?? null;
+    };
+
+    const items: LinkedRow[] = [];
+
+    const salesItems = await this.salesItemRepository
+      .createQueryBuilder('item')
+      .leftJoinAndSelect('item.sales', 'sales')
+      .leftJoinAndSelect('sales.customer', 'customer')
+      .leftJoinAndSelect('sales.registeredByUser', 'registeredByUser')
+      .leftJoinAndSelect('item.container', 'container')
+      .where('item.containerId IN (:...ids)', { ids })
+      .andWhere('item.status != :cancelledStatus', { cancelledStatus: 'SALES_ITEM_CANCELLED' })
+      .getMany();
+
+    for (const item of salesItems) {
+      if (!idSet.has(String(item.containerId))) continue;
+      const container = item.container ?? containerById.get(String(item.containerId));
+      const sales = item.sales;
+      const customer = sales?.customer;
+
+      let cargoBales = 0;
+      let cargoWeight = 0;
+      if (item.containerType === 'CONTAINER' && container) {
+        const q = resolveContainerTypeSalesItemCargoQuantities(container, item);
+        cargoBales = q.bales;
+        cargoWeight = q.weight;
+      } else {
+        cargoBales = item.cargoBales ? Number(item.cargoBales) : 0;
+        cargoWeight = item.cargoWeight ? Number(item.cargoWeight) : 0;
+      }
+
+      const isInventoryAdjustment =
+        item.status === 'INVENTORY_INBOUND' ||
+        item.status === 'INVENTORY_CONSUMPTION' ||
+        (item.status === 'SALES_ITEM_COMPLETED' && customer === null);
+      const displayCustomerName = isInventoryAdjustment
+        ? item.status === 'INVENTORY_INBOUND'
+          ? '재고 입고'
+          : '재고 소모'
+        : (customer?.companyName ?? customer?.ceo ?? '-');
+      const displayStatusName =
+        item.status === 'INVENTORY_INBOUND'
+          ? '재고 입고'
+          : item.status === 'INVENTORY_CONSUMPTION'
+            ? '재고 소모'
+            : (getCodeName('SALES_ITEM_STATUS', item.status) ?? item.status ?? null);
+
+      items.push({
+        id: `sales-item-${item.id}`,
+        sourceType: 'SALES',
+        salesId: sales?.id ?? null,
+        containerId: String(item.containerId),
+        containerNo: container?.containerNo ?? null,
+        customerId: customer?.id ?? null,
+        customerName: displayCustomerName,
+        status: item.status ?? null,
+        statusName: displayStatusName,
+        containerType: item.containerType ?? null,
+        cargoBales,
+        cargoWeight,
+        salesUnitPrice: item.salesUnitPrice ? Number(item.salesUnitPrice) : null,
+        reservationDate: sales?.reservationDate ? this.formatDate(sales.reservationDate) : null,
+        salesDate: sales?.salesDate ? this.formatDate(sales.salesDate) : null,
+        registeredByName: sales?.registeredByUser?.name ?? null,
+        notes: item.reservationNotes ?? null,
+        sortAt: sales?.createdAt?.getTime() ?? item.createdAt?.getTime() ?? 0,
+      });
+    }
+
+    const reservationQb = this.salesReservationRepository
+      .createQueryBuilder('r')
+      .leftJoinAndSelect('r.customer', 'customer')
+      .leftJoinAndSelect('r.registeredByUser', 'registeredByUser')
+      .leftJoinAndSelect('r.container', 'container')
+      .where('r.status = :st', { st: 'ACTIVE' })
+      .andWhere(
+        new Brackets((w) => {
+          w.where('r.containerId IN (:...ids)', { ids });
+          if (orderIds.length > 0) {
+            w.orWhere('(r.tradeOrderId IN (:...oids) AND r.containerId IS NULL)', { oids: orderIds });
+          }
+        }),
+      );
+    const reservations = await reservationQb.getMany();
+
+    for (const r of reservations) {
+      const pq = this.parseSalesMgmtReservationQty(r);
+      if (pq.bales <= 0 && pq.weight <= 0) continue;
+
+      const customer = r.customer;
+      const customerName = customer?.companyName ?? customer?.ceo ?? r.bl ?? '-';
+      const base = {
+        sourceType: 'RESERVATION' as const,
+        salesId: null,
+        customerId: customer?.id ?? null,
+        customerName,
+        status: 'SALES_RESERVATION',
+        statusName: '판매예약',
+        containerType: null,
+        salesUnitPrice: r.unitPrice ? Number(r.unitPrice) : null,
+        reservationDate: r.loadingDate ? this.formatDate(r.loadingDate) : null,
+        salesDate: null,
+        registeredByName: r.registeredByUser?.name ?? null,
+        notes: r.remarks ?? null,
+        sortAt: r.createdAt?.getTime() ?? 0,
+      };
+
+      if (r.containerId != null && String(r.containerId).trim() !== '') {
+        const cid = String(r.containerId);
+        if (!idSet.has(cid)) continue;
+        const container = containerById.get(cid) ?? r.container;
+        items.push({
+          ...base,
+          id: `reservation-${r.id}-${cid}`,
+          containerId: cid,
+          containerNo: container?.containerNo ?? null,
+          cargoBales: pq.bales,
+          cargoWeight: pq.weight,
+        });
+        continue;
+      }
+
+      const oid = r.tradeOrderId != null ? String(r.tradeOrderId) : '';
+      const orderContainers = containers.filter((c) => c.order?.id != null && String(c.order.id) === oid);
+      if (orderContainers.length === 0) continue;
+
+      const parts = this.distributeSalesMgmtReservationToContainers(orderContainers, pq);
+      for (const p of parts) {
+        if (!idSet.has(p.id) || (p.bales <= 0 && p.weight <= 0)) continue;
+        const container = containerById.get(p.id);
+        items.push({
+          ...base,
+          id: `reservation-${r.id}-${p.id}`,
+          containerId: p.id,
+          containerNo: container?.containerNo ?? null,
+          cargoBales: p.bales,
+          cargoWeight: p.weight,
+        });
+      }
+    }
+
+    const statusOk = await this.getSheetRowStatusesEligibleForInventoryDeduction();
+    const sheetRows = await this.salesReservationSheetRowRepository.find({
+      where: { sheetId: PRODUCT_RESERVATIONS_GRID_SHEET_ID },
+    });
+
+    const containersByBlProduct = new Map<string, TradeContainer[]>();
+    for (const c of containers) {
+      const order = c.order;
+      const contract = order?.contract;
+      if (!order || !contract) continue;
+      const bl = this.normalizeBlForSheetMatch(order.bl);
+      const prod = (contract.productName ?? '').trim();
+      if (!bl || !prod) continue;
+      const k = `${bl}|${prod}`;
+      if (!containersByBlProduct.has(k)) containersByBlProduct.set(k, []);
+      containersByBlProduct.get(k)!.push(c);
+    }
+
+    for (const sheetRow of sheetRows) {
+      const st = (sheetRow.status ?? '').trim();
+      if (!st || !statusOk.has(st)) continue;
+      const bl = this.normalizeBlForSheetMatch(sheetRow.bl);
+      const pc = (sheetRow.productCode ?? '').trim();
+      if (!bl || !pc) continue;
+      const matched = containersByBlProduct.get(`${bl}|${pc}`);
+      if (!matched?.length) continue;
+
+      const units = this.parseGridSheetRowRequestedContainerUnits(sheetRow.requestedQty);
+      if (units <= 0) continue;
+
+      const dist = this.computeGridSheetReservationDistribution(matched, units);
+      for (const p of dist.perContainer) {
+        if (!idSet.has(p.id) || (p.bales <= 0 && p.weight <= 0)) continue;
+        const container = containerById.get(p.id);
+        items.push({
+          id: `sheet-${sheetRow.id}-${p.id}`,
+          sourceType: 'SHEET',
+          salesId: null,
+          containerId: p.id,
+          containerNo: container?.containerNo ?? null,
+          customerId: null,
+          customerName: sheetRow.companyName?.trim() || '-',
+          status: 'SHEET_RESERVATION',
+          statusName: sheetRow.status?.trim() || '시트예약',
+          containerType: null,
+          cargoBales: p.bales,
+          cargoWeight: p.weight,
+          salesUnitPrice: sheetRow.unitPrice ? Number(sheetRow.unitPrice) : null,
+          reservationDate: null,
+          salesDate: null,
+          registeredByName: null,
+          notes: sheetRow.remarks ?? null,
+          sortAt: sheetRow.updatedAt?.getTime() ?? sheetRow.createdAt?.getTime() ?? 0,
+        });
+      }
+    }
+
+    items.sort((a, b) => b.sortAt - a.sortAt);
+    const result = items.map(({ sortAt: _sortAt, ...rest }) => rest);
+    const salesCount = new Set(result.filter((i) => i.sourceType === 'SALES' && i.salesId).map((i) => i.salesId)).size;
+
+    return { items: result, salesCount, linkedCount: result.length };
   }
 
   /**

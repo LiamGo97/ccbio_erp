@@ -67,6 +67,8 @@ export default function ConsultationsPage() {
   const [sortBy, setSortBy] = React.useState<'consultationDate' | 'companyName' | 'createdAt'>('consultationDate');
   const [sortOrder, setSortOrder] = React.useState<'asc' | 'desc'>('desc');
   const [selectedManager, setSelectedManager] = React.useState<string>('__all__');
+  const [selectedSource, setSelectedSource] = React.useState<string>('__all__');
+  const [selectedReplyStatus, setSelectedReplyStatus] = React.useState<string>('__all__');
   const [startDate, setStartDate] = React.useState<Date | undefined>(undefined);
   const [endDate, setEndDate] = React.useState<Date | undefined>(undefined);
 
@@ -110,6 +112,8 @@ export default function ConsultationsPage() {
     sortBy,
     sortOrder,
     managerId: selectedManager !== '__all__' ? Number(selectedManager) : undefined,
+    source: selectedSource !== '__all__' ? selectedSource : undefined,
+    replyStatus: selectedReplyStatus !== '__all__' ? selectedReplyStatus : undefined,
     startDate: startDate ? format(startDate, 'yyyy-MM-dd') : undefined,
     endDate: endDate ? format(endDate, 'yyyy-MM-dd') : undefined,
   };
@@ -130,6 +134,7 @@ export default function ConsultationsPage() {
   const { data: chamchamCodes } = useCodesByCategory('CHAMCHAM_STATUS');
   const { data: consultationTypeCodes } = useCodeMastersByGroup('CONSULTATION_TYPE');
   const { data: consultationSourceCodes } = useCodeMastersByGroup('CONSULTATION_SOURCE');
+  const { data: replyStatusCodes } = useCodesByCategory('CONSULTATION_REPLY_STATUS');
 
   // 코드 맵 생성
   const requestWeightMap = React.useMemo(() => {
@@ -231,6 +236,16 @@ export default function ConsultationsPage() {
     });
     return map;
   }, [salesGradeCodes]);
+
+  const replyStatusMap = React.useMemo(() => {
+    const map = new Map<string, string>();
+    (replyStatusCodes ?? []).forEach((c) => {
+      const key = (c.value ?? c.name ?? '').trim();
+      const label = (c.name ?? c.value ?? '').trim();
+      if (key) map.set(key, label || key);
+    });
+    return map;
+  }, [replyStatusCodes]);
 
   const labelOr = React.useCallback((map: Map<string, string>, value?: string | null) => {
     const key = (value ?? '').trim();
@@ -534,6 +549,28 @@ export default function ConsultationsPage() {
         size: 120,
       },
       {
+        accessorKey: 'replyStatus',
+        header: '답변 진행상태',
+        enableSorting: false,
+        cell: ({ row }) => {
+          const v = row.original.replyStatus;
+          const text = v ? labelOr(replyStatusMap, v) || v : '';
+          return <div className="text-sm">{text || '-'}</div>;
+        },
+        size: 120,
+      },
+      {
+        accessorKey: 'replyAssigneeName',
+        header: '답변 담당자',
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="text-sm">
+            {row.original.replyAssigneeName ?? row.original.replyAssigneeId ?? '-'}
+          </div>
+        ),
+        size: 120,
+      },
+      {
         accessorKey: 'notes',
         header: '메모',
         enableSorting: false,
@@ -554,6 +591,7 @@ export default function ConsultationsPage() {
       chamchamMap,
       typeMap,
       sourceMap,
+      replyStatusMap,
     ],
   );
 
@@ -610,6 +648,64 @@ export default function ConsultationsPage() {
                 {salesUser.name || salesUser.email}
               </SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex w-full items-center gap-2 md:w-auto">
+        <Label className="whitespace-nowrap text-sm font-medium text-muted-foreground">
+          유입경로
+        </Label>
+        <Select
+          value={selectedSource}
+          onValueChange={(value) => {
+            setSelectedSource(value);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className="w-48 md:w-60" size="sm">
+            <SelectValue placeholder="유입경로" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">전체</SelectItem>
+            {(consultationSourceCodes ?? []).map((code) => {
+              const value = (code.value ?? code.name ?? '').trim();
+              if (!value) return null;
+              const label = (code.name ?? code.value ?? value).trim() || value;
+              return (
+                <SelectItem key={code.id} value={value}>
+                  {label}
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex w-full items-center gap-2 md:w-auto">
+        <Label className="whitespace-nowrap text-sm font-medium text-muted-foreground">
+          답변 진행상태
+        </Label>
+        <Select
+          value={selectedReplyStatus}
+          onValueChange={(value) => {
+            setSelectedReplyStatus(value);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className="w-48 md:w-60" size="sm">
+            <SelectValue placeholder="답변 진행상태" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">전체</SelectItem>
+            {(replyStatusCodes ?? []).map((code) => {
+              const value = (code.value ?? code.name ?? '').trim();
+              if (!value) return null;
+              const label = (code.name ?? code.value ?? value).trim() || value;
+              return (
+                <SelectItem key={code.id} value={value}>
+                  {label}
+                </SelectItem>
+              );
+            })}
           </SelectContent>
         </Select>
       </div>

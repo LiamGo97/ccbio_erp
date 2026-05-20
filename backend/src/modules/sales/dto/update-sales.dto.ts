@@ -227,6 +227,11 @@ export class UpdateSalesDto {
   @Type(() => Boolean)
   isCancellation?: boolean;
 
+  /** 판매 비고 (운송관리에서도 표시) */
+  @IsOptional()
+  @IsString()
+  notes?: string | null;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => UpdateSalesItemDto)

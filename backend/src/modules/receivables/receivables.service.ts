@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, DataSource, LessThanOrEqual, IsNull } from 'typeorm';
+import { Repository, In, DataSource, LessThanOrEqual, IsNull, Brackets } from 'typeorm';
 import * as XLSX from 'xlsx';
 import { unlinkSync } from 'fs';
 import { AccountsReceivable } from './entities/accounts-receivable.entity';
@@ -26,6 +26,7 @@ import { SmsSenderService } from '../sms-sender/sms-sender.service';
 import { SmsTemplatesService } from '../sms-templates/sms-templates.service';
 import { SendReceivableWarningSmsDto } from './dto/send-receivable-warning-sms.dto';
 import { ReceivableSmsBatch } from './entities/receivable-sms-batch.entity';
+import { SmsHistory } from '../sms-history/entities/sms-history.entity';
 
 export interface ReceivableListItem {
   id: string;
@@ -118,12 +119,15 @@ export interface CollectionListItem {
   customerName: string | null;
   companyName: string | null;
   ceo: string | null;
+  phone: string | null;
   collectionAmount: number;
   collectionDate: string;
   collectionMethod: string | null;
   notes: string | null;
   isPrepayment: boolean;
   createdAt: string;
+  /** tb_sms_history 최신 sh_status (relatedType=RECEIVABLE_COLLECTION) */
+  smsStatus?: string | null;
 }
 
 export interface GetCollectionsResponse {
@@ -192,6 +196,8 @@ export class ReceivablesService {
     private readonly prepaymentRepository: Repository<CustomerPrepayment>,
     @InjectRepository(ReceivableSmsBatch)
     private readonly receivableSmsBatchRepository: Repository<ReceivableSmsBatch>,
+    @InjectRepository(SmsHistory)
+    private readonly smsHistoryRepository: Repository<SmsHistory>,
     private readonly dataSource: DataSource,
     private readonly transactionNumberGenerator: TransactionNumberGenerator,
     private readonly aligoService: AligoService,
@@ -1297,6 +1303,42 @@ export class ReceivablesService {
       qb.andWhere('collection.isPrepayment = :normalOnly', { normalOnly: false });
     }
 
+    /** 수금 알림 문자 이력(tb_sms_history) — 발송 연동 시 relatedId=수금ID, relatedType 고정 */
+    const COLLECTION_SMS_HISTORY_RELATED_TYPE = 'RECEIVABLE_COLLECTION';
+    const latestCollectionSmsStatusSql = `(
+      SELECT sh.sh_status
+      FROM tb_sms_history sh
+      WHERE sh.sh_related_type = :collSmsRelType
+        AND sh.sh_related_id = collection.id
+      ORDER BY sh.sh_created_at DESC NULLS LAST
+      LIMIT 1
+    )`;
+
+    qb.setParameter('collSmsRelType', COLLECTION_SMS_HISTORY_RELATED_TYPE);
+    const smsFilterList = dto.smsStatuses;
+    if (smsFilterList !== undefined) {
+      if (smsFilterList.length === 0) {
+        qb.andWhere('1 = 0');
+      } else {
+        qb.andWhere(
+          new Brackets((wqb) => {
+            smsFilterList.forEach((token, idx) => {
+              const raw = String(token).trim();
+              if (raw === 'NONE' || raw === 'null') {
+                wqb.orWhere(`${latestCollectionSmsStatusSql} IS NULL`);
+              } else if (raw === 'not_applicable' || raw === 'NOT_APPLICABLE') {
+                wqb.orWhere('0 = 1');
+              } else {
+                wqb.orWhere(`${latestCollectionSmsStatusSql} = :collSmsTok${idx}`, {
+                  [`collSmsTok${idx}`]: raw,
+                });
+              }
+            });
+          }),
+        );
+      }
+    }
+
     const sumRow = await qb
       .clone()
       .select('COALESCE(SUM(collection.collectionAmount), 0)', 'totalCollectionAmount')
@@ -1333,11 +1375,34 @@ export class ReceivablesService {
       .take(limit)
       .getManyAndCount();
 
+    const collectionIds = items.map((c) => c.id).filter((id) => id != null && id !== '');
+    const numericCollectionIds = collectionIds
+      .map((id) => Number(id))
+      .filter((n) => Number.isFinite(n));
+    const smsLatestByCollectionId = new Map<string, string | null>();
+    if (numericCollectionIds.length > 0) {
+      const histories = await this.smsHistoryRepository.find({
+        where: {
+          relatedType: COLLECTION_SMS_HISTORY_RELATED_TYPE,
+          relatedId: In(numericCollectionIds),
+        },
+        order: { createdAt: 'DESC' },
+      });
+      for (const h of histories) {
+        if (h.relatedId == null) continue;
+        const rid = String(h.relatedId);
+        if (!smsLatestByCollectionId.has(rid)) {
+          smsLatestByCollectionId.set(rid, h.status ?? null);
+        }
+      }
+    }
+
     const data: CollectionListItem[] = items.map((collection) => {
       const customer =
         collection.customer ?? collection.receivable?.customer ?? null;
       const companyName = customer?.companyName ?? null;
       const ceo = customer?.ceo ?? null;
+      const phone = customer?.phone ?? null;
       const customerName = companyName ?? ceo ?? null;
 
       return {
@@ -1348,6 +1413,7 @@ export class ReceivablesService {
         customerName,
         companyName,
         ceo,
+        phone,
         collectionAmount: Number(collection.collectionAmount),
         collectionDate: (() => {
           if (collection.collectionDate instanceof Date) {
@@ -1366,6 +1432,7 @@ export class ReceivablesService {
           collection.createdAt instanceof Date
             ? collection.createdAt.toISOString()
             : String(collection.createdAt),
+        smsStatus: smsLatestByCollectionId.get(String(collection.id)) ?? null,
       };
     });
 

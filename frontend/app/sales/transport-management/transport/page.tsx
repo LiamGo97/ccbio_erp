@@ -409,6 +409,24 @@ function SalesTransportManagementDispatchPageContent() {
       enableSorting: true,
     },
     {
+      id: 'sales.notes',
+      accessorKey: 'sales.notes',
+      header: '판매 비고',
+      cell: ({ row }) => {
+        const text = row.original.sales?.notes?.trim() || '';
+        return (
+          <div
+            className="text-sm text-muted-foreground truncate max-w-[12rem]"
+            title={text || undefined}
+          >
+            {text || '-'}
+          </div>
+        );
+      },
+      size: 160,
+      enableSorting: false,
+    },
+    {
       id: 'dispatchCompany',
       accessorKey: 'dispatchCompany',
       header: '배차 업체',

@@ -84,6 +84,7 @@ export class SalesService {
       cancellationReason: sales.cancellationReason,
       advancePaymentRatio: sales.advancePaymentRatio != null ? Number(sales.advancePaymentRatio) : null,
       advancePaymentAmount: sales.advancePaymentAmount != null ? Number(sales.advancePaymentAmount) : null,
+      notes: sales.notes ?? null,
       createdAt: sales.createdAt,
       updatedAt: sales.updatedAt,
       items: (sales.items ?? []).map((item) => ({
@@ -681,6 +682,7 @@ export class SalesService {
         registeredBy: userId || null,
         advancePaymentRatio: advancePaymentRatio,
         advancePaymentAmount: advancePaymentAmount,
+        notes: dto.notes !== undefined ? this.sanitize(dto.notes) : null,
       });
 
       const savedSales = await manager.save(Sales, sales);
@@ -1204,6 +1206,7 @@ export class SalesService {
         salesDate: this.formatDate(sale.salesDate),
         requestVehicle: sale.requestVehicle ?? null,
         transportFee: sale.transportFee != null ? Number(sale.transportFee) : null,
+        notes: sale.notes?.trim() || null,
         registeredBy: sale.registeredBy,
         registeredByName: sale.registeredByUser?.name ?? null,
         createdAt: sale.createdAt.toISOString(),
@@ -1526,6 +1529,7 @@ export class SalesService {
           salesDate: this.formatDate(sale.salesDate),
           requestVehicle: sale.requestVehicle ?? null,
           transportFee: sale.transportFee != null ? Number(sale.transportFee) : null,
+          notes: sale.notes?.trim() || null,
           unloadingPostalCode: sale.unloadingPostalCode ?? null,
           unloadingAddress: sale.unloadingAddress ?? null,
           unloadingAddressRoad: sale.unloadingAddressRoad ?? null,
@@ -1698,6 +1702,9 @@ export class SalesService {
           }
           if (dto.transportFee !== undefined) {
             existingSales.transportFee = dto.transportFee != null ? dto.transportFee : null;
+          }
+          if (dto.notes !== undefined) {
+            existingSales.notes = this.sanitize(dto.notes);
           }
           // 선입금 정보 업데이트
           if (dto.advancePaymentRatio !== undefined) {
@@ -2304,6 +2311,9 @@ export class SalesService {
       }
       if (dto.transportFee !== undefined) {
         existingSales.transportFee = dto.transportFee != null ? dto.transportFee : null;
+      }
+      if (dto.notes !== undefined) {
+        existingSales.notes = this.sanitize(dto.notes);
       }
       if (dto.unloadingPostalCode !== undefined) {
         existingSales.unloadingPostalCode = dto.unloadingPostalCode?.trim() || null;

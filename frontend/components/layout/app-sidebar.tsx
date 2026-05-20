@@ -42,6 +42,8 @@ import {
   CalendarPlus,
   Table2,
   MapPin,
+  Layers,
+  Contact,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarHeader, SidebarRail, useSidebar, SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem } from '@/components/ui/sidebar';
@@ -155,6 +157,26 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
   const isInboundConfirmedPath = normalizedPathname === '/inbound/confirmed';
   const isInboundPath = normalizedPathname === '/inbound';
   const isInboundManagementPath = isInboundPendingPath || isInboundScheduledPath || isInboundConfirmedPath || isInboundPath;
+
+  /** 신규 사이드바: 영업(신규) > 입고·재고 — 영업 전용 라우트 */
+  const isSalesInboundV2PendingPath = normalizedPathname === '/sales/inbound/pending';
+  const isSalesInboundV2ScheduledPath = normalizedPathname === '/sales/inbound/scheduled';
+  const isSalesInboundV2ConfirmedPath = normalizedPathname === '/sales/inbound/confirmed';
+  const isSalesInboundV2ManagementPath =
+    isSalesInboundV2PendingPath ||
+    isSalesInboundV2ScheduledPath ||
+    isSalesInboundV2ConfirmedPath;
+  const isSalesInventoryV2PendingPath = normalizedPathname === '/sales/inventory/pending';
+  const isSalesInventoryV2ConfirmedPath = normalizedPathname === '/sales/inventory/confirmed';
+  const isSalesInventoryV2ManagementPath =
+    isSalesInventoryV2PendingPath || isSalesInventoryV2ConfirmedPath;
+  const isSalesManagementV2Path =
+    normalizedPathname === '/sales/management-v2' ||
+    normalizedPathname?.startsWith('/sales/management-v2/');
+  const isSalesV2ManagementPath =
+    isSalesInboundV2ManagementPath ||
+    isSalesInventoryV2ManagementPath ||
+    isSalesManagementV2Path;
   
   // 재고관리 관련 경로
   const isInventoryPath = normalizedPathname === '/inventory';
@@ -166,6 +188,8 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
   const isSalesDashboardPath = normalizedPathname === '/sales/dashboard';
   const isSalesTransportManagementPath = normalizedPathname?.startsWith('/sales/transport-management');
   const isSalesTransportPath = normalizedPathname === '/sales/transport-management/transport';
+  const isSalesTransportByDriverPath =
+    normalizedPathname === '/sales/transport-management/by-driver';
   const isSalesInvoicePath = normalizedPathname?.startsWith('/sales/invoice');
   const isSalesProductReservationPath = normalizedPathname === '/sales/product-reservations';
   const isSalesProductReservationSheetPath =
@@ -618,12 +642,24 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
                               <SidebarMenuSubItem>
                                 <SidebarMenuSubButton
                                   asChild
-                                  isActive={normalizedPathname === '/sales/transport-management/transport'}
+                                  isActive={isSalesTransportPath}
                                   onClick={() => router.push('/sales/transport-management/transport')}
                                 >
                                   <a href="/sales/transport-management/transport">
                                     <Truck className="h-4 w-4" />
                                     <span>운송관리</span>
+                                  </a>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                              <SidebarMenuSubItem>
+                                <SidebarMenuSubButton
+                                  asChild
+                                  isActive={isSalesTransportByDriverPath}
+                                  onClick={() => router.push('/sales/transport-management/by-driver')}
+                                >
+                                  <a href="/sales/transport-management/by-driver">
+                                    <Contact className="h-4 w-4" />
+                                    <span>기사별 운송</span>
                                   </a>
                                 </SidebarMenuSubButton>
                               </SidebarMenuSubItem>
@@ -1615,6 +1651,154 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
                           <a href="/vehicle-dispatch-warehouse">
                             <Warehouse className="h-4 w-4" />
                             <span>상차관리(구버전)</span>
+                          </a>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    </SidebarMenuSub>
+                  </CollapsibleContent>
+                </SidebarMenuItem>
+              </Collapsible>
+
+              {/* 영업 — 구메뉴 아래 신규: 입고·재고 (상단 영업 메뉴와 별도) */}
+              <Collapsible
+                asChild
+                defaultOpen={isSalesV2ManagementPath}
+                className="group/collapsible"
+              >
+                <SidebarMenuItem>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <CollapsibleTrigger asChild>
+                        <TooltipTrigger asChild>
+                          <SidebarMenuButton
+                            isActive={isSalesV2ManagementPath}
+                          >
+                            <Layers />
+                            <span>영업</span>
+                            <ChevronDown className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
+                          </SidebarMenuButton>
+                        </TooltipTrigger>
+                      </CollapsibleTrigger>
+                      {isCollapsed && (
+                        <TooltipContent side="right">
+                          <p>영업 — 신규 입고·재고</p>
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
+                  </TooltipProvider>
+                  <CollapsibleContent>
+                    <SidebarMenuSub>
+                      <Collapsible
+                        asChild
+                        defaultOpen={isSalesInboundV2ManagementPath}
+                        className="group/collapsible-sub"
+                      >
+                        <SidebarMenuSubItem>
+                          <CollapsibleTrigger asChild>
+                            <SidebarMenuSubButton
+                              isActive={isSalesInboundV2ManagementPath}
+                            >
+                              <Warehouse className="h-4 w-4" />
+                              <span>입고 관리</span>
+                              <ChevronDown className="ml-auto h-4 w-4 transition-transform duration-200 group-data-[state=open]/collapsible-sub:rotate-180" />
+                            </SidebarMenuSubButton>
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            <SidebarMenuSub>
+                              <SidebarMenuSubItem>
+                                <SidebarMenuSubButton
+                                  asChild
+                                  isActive={isSalesInboundV2PendingPath}
+                                  onClick={() => router.push('/sales/inbound/pending')}
+                                >
+                                  <a href="/sales/inbound/pending">
+                                    <Clock className="h-4 w-4" />
+                                    <span>입고 대기</span>
+                                  </a>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                              <SidebarMenuSubItem>
+                                <SidebarMenuSubButton
+                                  asChild
+                                  isActive={isSalesInboundV2ScheduledPath}
+                                  onClick={() => router.push('/sales/inbound/scheduled')}
+                                >
+                                  <a href="/sales/inbound/scheduled">
+                                    <Calendar className="h-4 w-4" />
+                                    <span>입고 예정</span>
+                                  </a>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                              <SidebarMenuSubItem>
+                                <SidebarMenuSubButton
+                                  asChild
+                                  isActive={isSalesInboundV2ConfirmedPath}
+                                  onClick={() => router.push('/sales/inbound/confirmed')}
+                                >
+                                  <a href="/sales/inbound/confirmed">
+                                    <CheckCircle2 className="h-4 w-4" />
+                                    <span>입고 확정</span>
+                                  </a>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                            </SidebarMenuSub>
+                          </CollapsibleContent>
+                        </SidebarMenuSubItem>
+                      </Collapsible>
+                      <Collapsible
+                        asChild
+                        defaultOpen={isSalesInventoryV2ManagementPath}
+                        className="group/collapsible-sub"
+                      >
+                        <SidebarMenuSubItem>
+                          <CollapsibleTrigger asChild>
+                            <SidebarMenuSubButton
+                              isActive={isSalesInventoryV2ManagementPath}
+                            >
+                              <Package className="h-4 w-4" />
+                              <span>재고 관리</span>
+                              <ChevronDown className="ml-auto h-4 w-4 transition-transform duration-200 group-data-[state=open]/collapsible-sub:rotate-180" />
+                            </SidebarMenuSubButton>
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            <SidebarMenuSub>
+                              <SidebarMenuSubItem>
+                                <SidebarMenuSubButton
+                                  asChild
+                                  isActive={isSalesInventoryV2PendingPath}
+                                  onClick={() => router.push('/sales/inventory/pending')}
+                                >
+                                  <a href="/sales/inventory/pending">
+                                    <Clock className="h-4 w-4" />
+                                    <span>입고예정재고</span>
+                                  </a>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                              <SidebarMenuSubItem>
+                                <SidebarMenuSubButton
+                                  asChild
+                                  isActive={isSalesInventoryV2ConfirmedPath}
+                                  onClick={() => router.push('/sales/inventory/confirmed')}
+                                >
+                                  <a href="/sales/inventory/confirmed">
+                                    <CheckCircle2 className="h-4 w-4" />
+                                    <span>입고확정재고</span>
+                                  </a>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                            </SidebarMenuSub>
+                          </CollapsibleContent>
+                        </SidebarMenuSubItem>
+                      </Collapsible>
+                      <SidebarMenuSubItem>
+                        <SidebarMenuSubButton
+                          asChild
+                          isActive={isSalesManagementV2Path}
+                          onClick={() => router.push('/sales/management-v2/sales')}
+                        >
+                          <a href="/sales/management-v2/sales">
+                            <ShoppingCart className="h-4 w-4" />
+                            <span>판매관리 (신규)</span>
                           </a>
                         </SidebarMenuSubButton>
                       </SidebarMenuSubItem>

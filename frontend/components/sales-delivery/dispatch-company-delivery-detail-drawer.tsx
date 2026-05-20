@@ -25,6 +25,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { formatNumber } from '@/lib/utils';
 import { DispatchCompanyDeliveryEditDrawer } from './dispatch-company-delivery-edit-drawer';
 import { salesUnloadingMainLine } from '@/lib/sales-unloading-display';
+import { SalesDeliverySalesNotesSection } from './sales-delivery-sales-notes-section';
 
 const formatPhone = (phone?: string | null): string => {
   if (!phone) return '-';
@@ -681,7 +682,7 @@ export const DispatchCompanyDeliveryDetailDrawer: React.FC<DispatchCompanyDelive
               </div>
             </section>
 
-            <Separator />
+            <SalesDeliverySalesNotesSection notes={data.sales?.notes} />
 
             {/* 배차 정보 */}
             <section className="space-y-2.5">
@@ -926,11 +927,11 @@ export const DispatchCompanyDeliveryDetailDrawer: React.FC<DispatchCompanyDelive
               </>
             )}
 
-            {/* 비고 */}
+            {/* 운송 비고 */}
             {data.notes && (
               <>
                 <section className="space-y-2.5">
-                  <h3 className="text-sm font-semibold text-foreground">비고</h3>
+                  <h3 className="text-sm font-semibold text-foreground">운송 비고</h3>
                   <div className="flex flex-col gap-1">
                     <span className="text-sm font-medium whitespace-pre-wrap">{data.notes}</span>
                   </div>

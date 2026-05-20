@@ -123,6 +123,7 @@ export function ConsultationDetailDrawer({
   const { data: operationSubCodes } = useCodesByCategory('OPERATION_SUBTYPE');
   const { data: feedingCodes } = useCodesByCategory('FEEDING_METHOD');
   const { data: chamchamCodes } = useCodesByCategory('CHAMCHAM_STATUS');
+  const { data: replyStatusCodes } = useCodesByCategory('CONSULTATION_REPLY_STATUS');
 
   const toCodeMap = React.useCallback(
     (codes?: Array<{ value?: string | null; name?: string | null }>) => {
@@ -152,6 +153,7 @@ export function ConsultationDetailDrawer({
   const operationSubMap = React.useMemo(() => toCodeMap(operationSubCodes), [toCodeMap, operationSubCodes]);
   const feedingMap = React.useMemo(() => toCodeMap(feedingCodes), [toCodeMap, feedingCodes]);
   const chamchamMap = React.useMemo(() => toCodeMap(chamchamCodes), [toCodeMap, chamchamCodes]);
+  const replyStatusMap = React.useMemo(() => toCodeMap(replyStatusCodes), [toCodeMap, replyStatusCodes]);
 
   const labelOr = React.useCallback(
     (map: Map<string, string>, value?: string | null) => {
@@ -620,6 +622,20 @@ export function ConsultationDetailDrawer({
               <h3 className="text-lg font-semibold">상담 메모</h3>
               <div className="rounded-lg border p-4">
                 <p className="text-sm whitespace-pre-wrap">{consultation.notes || '-'}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                <InfoRow
+                  label="답변 진행상태"
+                  value={
+                    consultation.replyStatus
+                      ? labelOr(replyStatusMap, consultation.replyStatus) || consultation.replyStatus
+                      : '-'
+                  }
+                />
+                <InfoRow
+                  label="답변 담당자"
+                  value={consultation.replyAssigneeName ?? consultation.replyAssigneeId ?? '-'}
+                />
               </div>
             </div>
 

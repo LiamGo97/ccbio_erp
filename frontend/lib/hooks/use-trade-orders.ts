@@ -224,17 +224,17 @@ export interface GetTradeOrdersParams {
   exporters?: string[];
 }
 
-/** `useTradeOrders` / 수동 재조회 공용 — 쿼리스트링 직렬화 동일 유지 */
-export async function fetchTradeOrders(
-  params?: GetTradeOrdersParams,
-): Promise<TradeOrder[]> {
+/** `useTradeOrders` — 쿼리스트링 직렬화 */
+export function buildTradeOrdersListSearchParams(params?: GetTradeOrdersParams): URLSearchParams {
   const searchParams = new URLSearchParams();
   if (params?.userId != null) searchParams.set('userId', String(params.userId));
   if (params?.contractStatus != null) {
     const v = params.contractStatus;
     (Array.isArray(v) ? v : [v]).forEach((s) => searchParams.append('contractStatus', s));
   }
-  if (params?.bookingOnly === true) searchParams.set('bookingOnly', 'true');
+  if (params?.bookingOnly === true) {
+    searchParams.set('bookingOnly', 'true');
+  }
   if (params?.status != null) searchParams.set('status', params.status);
   if (params?.tradeStatus != null) {
     const v = params.tradeStatus;
@@ -278,7 +278,11 @@ export async function fetchTradeOrders(
       params.exporters.forEach((e) => searchParams.append('exporters', e));
     }
   }
-  const queryString = searchParams.toString();
+  return searchParams;
+}
+
+export async function fetchTradeOrders(params?: GetTradeOrdersParams): Promise<TradeOrder[]> {
+  const queryString = buildTradeOrdersListSearchParams(params).toString();
   const url = queryString ? `/trade/contracts/orders?${queryString}` : '/trade/contracts/orders';
   const response = await api.get<TradeOrder[]>(url);
   return response.data;

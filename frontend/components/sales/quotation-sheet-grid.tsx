@@ -82,10 +82,14 @@ const COL_REQUESTED_QTY = -1;
 /** A열 BL(검색/선택) */
 const COL_COMPANY = 0;
 
-/** 통화·단가·수출국·환율·원가·판매가(자동) / 마진(입력) 열 */
+/** 통화·단가·수출국·…·비고·환율 계산(입력 가능)·원가·판매가 / 마진(입력) */
 const COL_QUOTE_CURRENCY = 2;
 const COL_QUOTE_UNIT_PRICE = 3;
 const COL_QUOTE_EXPORT_COUNTRY = 4;
+const COL_QUOTE_PRODUCT = 5;
+const COL_QUOTE_GRADE = 6;
+const COL_QUOTE_PACKING = 7;
+const COL_QUOTE_REMARKS = 8;
 const COL_QUOTE_FX_CALC = 9;
 const COL_QUOTE_COST = 10;
 const COL_QUOTE_MARGIN = 11;
@@ -93,10 +97,10 @@ const COL_QUOTE_SELLING = 12;
 const COL_QUOTE_ETA = 1;
 
 /**
- * 견적서 그리드: ETA~원가(1~10)·판매가(12)는 BL 자동 채움·계산 필드 → 사용자 편집 불가.
- * 입력 가능: BL(0), 마진(11)만.
+ * 견적서 그리드: BL·마진·환율 계산(9)만 입력, 나머지 자동·읽기 전용이 많음.
  */
 function isQuotationReadonlySheetColumn(col: number): boolean {
+  if (col === COL_QUOTE_FX_CALC) return false;
   return (
     (col >= COL_QUOTE_ETA && col <= COL_QUOTE_COST) ||
     col === COL_QUOTE_SELLING
@@ -215,7 +219,7 @@ function nudgeOffHiddenSheetCol(col: number): number {
 }
 
 function isSheetNumericColumn(col: number): boolean {
-  return false;
+  return col === COL_QUOTE_FX_CALC;
 }
 
 /** Select·숫자가 아닌 자유 텍스트 열 — IME는 `<input value>` 제어보다 contenteditable이 안정적 */
@@ -248,7 +252,6 @@ type SheetBlSearchResult = {
   salesNotes?: string | null;
 };
 
-/** 시트 BL열·부킹 옵션 value와 동일: BL 우선, 없으면 BK */
 function sheetBookingSearchStoredValue(item: SheetBlSearchResult): string {
   const bl = (item.bl ?? '').trim();
   if (bl) return bl;
@@ -313,7 +316,7 @@ function quotationFxMultiplierFromCurrencyLabel(currencyLabel: string): number |
   return null;
 }
 
-/** 환율 계산 칸 저장/표시용 문자열 — 통화·단가가 맞을 때만 값, 아니면 빈 문자열 */
+/** BL 선택 시 비워 둔 환율 계산 칸에 넣는 값: 단가×통화 고정 배율 */
 function formatQuotationFxCalcStoredValue(
   unitPriceRaw: string,
   currencyLabel: string,
@@ -337,6 +340,23 @@ function parseQuotationFxCalcNumeric(
   if (!s) return null;
   const n = parseFloat(s);
   return Number.isFinite(n) ? n : null;
+}
+
+/** 환율 계산 셀에 숫자가 있으면 그걸 쓰고, 비어 있으면 단가×배율 */
+function parseQuotationFxNumericForCost(
+  unitPriceRaw: string,
+  currencyLabel: string,
+  fxCalcCellRaw?: string,
+): number | null {
+  const t = (fxCalcCellRaw ?? '').trim();
+  if (t) {
+    const cleaned = sanitizeSheetNumericInput(t);
+    if (cleaned) {
+      const n = parseFloat(cleaned.replace(/,/g, ''));
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return parseQuotationFxCalcNumeric(unitPriceRaw, currencyLabel);
 }
 
 /**
@@ -377,8 +397,13 @@ function formatQuotationCostStoredValue(
   unitPriceRaw: string,
   currencyLabel: string,
   exportCountryRaw: string,
+  fxCalcCellRaw?: string,
 ): string {
-  const fx = parseQuotationFxCalcNumeric(unitPriceRaw, currencyLabel);
+  const fx = parseQuotationFxNumericForCost(
+    unitPriceRaw,
+    currencyLabel,
+    fxCalcCellRaw,
+  );
   if (fx == null) return '';
   const cost = quotationCostNumericFromFx(fx, exportCountryRaw);
   if (cost == null || !Number.isFinite(cost)) return '';
@@ -391,6 +416,7 @@ function formatQuotationSellingPriceStoredValue(
   currencyLabel: string,
   exportCountryRaw: string,
   marginRaw: string,
+  fxCalcCellRaw?: string,
 ): string {
   const marginCleaned = sanitizeSheetNumericInput((marginRaw ?? '').trim());
   if (!marginCleaned) return '';
@@ -400,6 +426,7 @@ function formatQuotationSellingPriceStoredValue(
     unitPriceRaw,
     currencyLabel,
     exportCountryRaw,
+    fxCalcCellRaw,
   );
   if (!costStr) return '';
   const costNum = parseFloat(costStr);
@@ -1019,10 +1046,10 @@ function columnHeaderLabel(index: number): string {
 
 function columnHeaderTitle(index: number): string | undefined {
   if (index === COL_QUOTE_FX_CALC) {
-    return `자동: 단가×배율(달러 ${QUOTATION_FX_USD_MULT}, 유로 ${QUOTATION_FX_EUR_MULT}). 상단 정보 참고`;
+    return `비우면 BL·통화 기준 자동(달러 ×${QUOTATION_FX_USD_MULT}, 유로 ×${QUOTATION_FX_EUR_MULT}). 직접 입력 시 그 값으로 원가·판매가 계산.`;
   }
   if (index === COL_QUOTE_COST) {
-    return '자동: 환율값+수출국. 상단 정보 참고';
+    return '자동: 환율 계산+수출국. 상단 정보 참고';
   }
   if (index === COL_QUOTE_MARGIN) {
     return '입력 시 판매가에 반영. 상단 정보 참고';
@@ -1306,12 +1333,12 @@ function applyRequestedQtyFromVehicleSelection(
   }
 }
 
-/** BL/BK(0열) 선택 시 자동 입력되는 ETA·통화·단가 등(1~8열) — BL을 비울 때 함께 제거 */
+/** BL/BK(0열) 선택 시 자동 입력되는 ETA·통화·단가·…·환율 계산(1~9열) — BL을 비울 때 함께 제거 */
 function clearQuotationFieldsFilledFromBlBooking(
   next: Record<string, string>,
   row: number,
 ): void {
-  for (let c = COL_QUOTE_ETA; c <= 8; c += 1) {
+  for (let c = COL_QUOTE_ETA; c <= COL_QUOTE_FX_CALC; c += 1) {
     next[cellKey(row, c)] = '';
   }
 }
@@ -1320,27 +1347,20 @@ function extractRowStrings(
   cells: Record<string, string>,
   row: number,
 ): string[] {
+  const price = cells[cellKey(row, COL_QUOTE_UNIT_PRICE)] ?? '';
+  const cur = cells[cellKey(row, COL_QUOTE_CURRENCY)] ?? '';
+  const ex = cells[cellKey(row, COL_QUOTE_EXPORT_COUNTRY)] ?? '';
+  const margin = cells[cellKey(row, COL_QUOTE_MARGIN)] ?? '';
+  const fxCell = cells[cellKey(row, COL_QUOTE_FX_CALC)] ?? '';
   return Array.from({ length: COL_COUNT }, (_, c) => {
     if (c === COL_QUOTE_FX_CALC) {
-      return formatQuotationFxCalcStoredValue(
-        cells[cellKey(row, COL_QUOTE_UNIT_PRICE)] ?? '',
-        cells[cellKey(row, COL_QUOTE_CURRENCY)] ?? '',
-      );
+      return fxCell;
     }
     if (c === COL_QUOTE_COST) {
-      return formatQuotationCostStoredValue(
-        cells[cellKey(row, COL_QUOTE_UNIT_PRICE)] ?? '',
-        cells[cellKey(row, COL_QUOTE_CURRENCY)] ?? '',
-        cells[cellKey(row, COL_QUOTE_EXPORT_COUNTRY)] ?? '',
-      );
+      return formatQuotationCostStoredValue(price, cur, ex, fxCell);
     }
     if (c === COL_QUOTE_SELLING) {
-      return formatQuotationSellingPriceStoredValue(
-        cells[cellKey(row, COL_QUOTE_UNIT_PRICE)] ?? '',
-        cells[cellKey(row, COL_QUOTE_CURRENCY)] ?? '',
-        cells[cellKey(row, COL_QUOTE_EXPORT_COUNTRY)] ?? '',
-        cells[cellKey(row, COL_QUOTE_MARGIN)] ?? '',
-      );
+      return formatQuotationSellingPriceStoredValue(price, cur, ex, margin, fxCell);
     }
     return cells[cellKey(row, c)] ?? '';
   });
@@ -1375,24 +1395,25 @@ function buildCopyTsv(
   for (let r = r0; r <= r1; r++) {
     const parts: string[] = [];
     for (let c = c0; c <= c1; c++) {
+      const price = cellMap[cellKey(r, COL_QUOTE_UNIT_PRICE)] ?? '';
+      const cur = cellMap[cellKey(r, COL_QUOTE_CURRENCY)] ?? '';
+      const ex = cellMap[cellKey(r, COL_QUOTE_EXPORT_COUNTRY)] ?? '';
+      const margin = cellMap[cellKey(r, COL_QUOTE_MARGIN)] ?? '';
+      const fxCell = cellMap[cellKey(r, COL_QUOTE_FX_CALC)] ?? '';
       const raw =
         c === COL_QUOTE_FX_CALC
-          ? formatQuotationFxCalcStoredValue(
-              cellMap[cellKey(r, COL_QUOTE_UNIT_PRICE)] ?? '',
-              cellMap[cellKey(r, COL_QUOTE_CURRENCY)] ?? '',
-            )
+          ? (fxCell.trim()
+              ? fxCell
+              : formatQuotationFxCalcStoredValue(price, cur))
           : c === COL_QUOTE_COST
-            ? formatQuotationCostStoredValue(
-                cellMap[cellKey(r, COL_QUOTE_UNIT_PRICE)] ?? '',
-                cellMap[cellKey(r, COL_QUOTE_CURRENCY)] ?? '',
-                cellMap[cellKey(r, COL_QUOTE_EXPORT_COUNTRY)] ?? '',
-              )
+            ? formatQuotationCostStoredValue(price, cur, ex, fxCell)
             : c === COL_QUOTE_SELLING
               ? formatQuotationSellingPriceStoredValue(
-                  cellMap[cellKey(r, COL_QUOTE_UNIT_PRICE)] ?? '',
-                  cellMap[cellKey(r, COL_QUOTE_CURRENCY)] ?? '',
-                  cellMap[cellKey(r, COL_QUOTE_EXPORT_COUNTRY)] ?? '',
-                  cellMap[cellKey(r, COL_QUOTE_MARGIN)] ?? '',
+                  price,
+                  cur,
+                  ex,
+                  margin,
+                  fxCell,
                 )
               : (cellMap[cellKey(r, c)] ?? '');
       parts.push(escapeCellForTsv(raw));
@@ -2783,6 +2804,11 @@ export const QuotationSheetGrid = React.forwardRef<
           next[cellKey(row, 6)] = pick.grade ?? '';
           next[cellKey(row, 7)] = pick.packing ?? '';
           next[cellKey(row, 8)] = (pick.salesNotes ?? pick.notes ?? '') || '';
+          next[cellKey(row, COL_QUOTE_FX_CALC)] =
+            formatQuotationFxCalcStoredValue(
+              next[cellKey(row, COL_QUOTE_UNIT_PRICE)] ?? '',
+              next[cellKey(row, COL_QUOTE_CURRENCY)] ?? '',
+            );
         } else if (cellValue.trim() === '') {
           clearQuotationFieldsFilledFromBlBooking(next, row);
         }
@@ -2828,28 +2854,30 @@ export const QuotationSheetGrid = React.forwardRef<
     const aoa = quotationBuildExportAoA({
       rowCount: rowCountRef.current,
       getCell: (r, c) => {
+        const cm = cellsRef.current;
+        const price = cm[cellKey(r, COL_QUOTE_UNIT_PRICE)] ?? '';
+        const cur = cm[cellKey(r, COL_QUOTE_CURRENCY)] ?? '';
+        const ex = cm[cellKey(r, COL_QUOTE_EXPORT_COUNTRY)] ?? '';
+        const margin = cm[cellKey(r, COL_QUOTE_MARGIN)] ?? '';
+        const fxCell = cm[cellKey(r, COL_QUOTE_FX_CALC)] ?? '';
         if (c === COL_QUOTE_FX_CALC) {
-          return formatQuotationFxCalcStoredValue(
-            cellsRef.current[cellKey(r, COL_QUOTE_UNIT_PRICE)] ?? '',
-            cellsRef.current[cellKey(r, COL_QUOTE_CURRENCY)] ?? '',
-          );
+          return fxCell.trim()
+            ? fxCell
+            : formatQuotationFxCalcStoredValue(price, cur);
         }
         if (c === COL_QUOTE_COST) {
-          return formatQuotationCostStoredValue(
-            cellsRef.current[cellKey(r, COL_QUOTE_UNIT_PRICE)] ?? '',
-            cellsRef.current[cellKey(r, COL_QUOTE_CURRENCY)] ?? '',
-            cellsRef.current[cellKey(r, COL_QUOTE_EXPORT_COUNTRY)] ?? '',
-          );
+          return formatQuotationCostStoredValue(price, cur, ex, fxCell);
         }
         if (c === COL_QUOTE_SELLING) {
           return formatQuotationSellingPriceStoredValue(
-            cellsRef.current[cellKey(r, COL_QUOTE_UNIT_PRICE)] ?? '',
-            cellsRef.current[cellKey(r, COL_QUOTE_CURRENCY)] ?? '',
-            cellsRef.current[cellKey(r, COL_QUOTE_EXPORT_COUNTRY)] ?? '',
-            cellsRef.current[cellKey(r, COL_QUOTE_MARGIN)] ?? '',
+            price,
+            cur,
+            ex,
+            margin,
+            fxCell,
           );
         }
-        return cellsRef.current[cellKey(r, c)] ?? '';
+        return cm[cellKey(r, c)] ?? '';
       },
     });
     const stamp = format(new Date(), 'yyyyMMdd-HHmmss');
@@ -2959,23 +2987,30 @@ export const QuotationSheetGrid = React.forwardRef<
               skippedLock++;
               return;
             }
-            if (c === 5) {
+            if (c === COL_QUOTE_FX_CALC) {
+              next[key] = sanitizeSheetNumericInput(
+                raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n'),
+              );
+              rowDirty = true;
+              return;
+            }
+            if (c === COL_QUOTE_PRODUCT) {
               const normalized = normalizeProductForPaste(raw, products);
               if (normalized === null) {
                 if (raw.trim() !== '') skippedInvalid++;
                 return;
               }
-              const prevP = (next[cellKey(r, 5)] ?? '').trim();
+              const prevP = (next[cellKey(r, COL_QUOTE_PRODUCT)] ?? '').trim();
               next[key] = normalized;
               if (prevP !== normalized.trim()) {
                 next[cellKey(r, 0)] = '';
-                next[cellKey(r, 6)] = '';
+                next[cellKey(r, COL_QUOTE_GRADE)] = '';
               }
               rowDirty = true;
               return;
             }
-            if (c === 6) {
-              const p = (next[cellKey(r, 5)] ?? '').trim();
+            if (c === COL_QUOTE_GRADE) {
+              const p = (next[cellKey(r, COL_QUOTE_PRODUCT)] ?? '').trim();
               const allowed = salesGradeAllowedListForProduct(
                 p,
                 salesGradeOptionsByProductCodeRef.current,
@@ -3003,12 +3038,12 @@ export const QuotationSheetGrid = React.forwardRef<
               rowDirty = true;
               return;
             }
-            if (c === 7 || c === 8) {
+            if (c === COL_QUOTE_PACKING || c === COL_QUOTE_REMARKS) {
               next[key] = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
               rowDirty = true;
               return;
             }
-            if (c === 11) {
+            if (c === COL_QUOTE_MARGIN) {
               next[key] = sanitizeSheetNumericInput(
                 raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n'),
               );
@@ -3016,8 +3051,8 @@ export const QuotationSheetGrid = React.forwardRef<
               return;
             }
             if (c === 0) {
-              const p = (next[cellKey(r, 5)] ?? '').trim();
-              const grade = (next[cellKey(r, 6)] ?? '').trim();
+              const p = (next[cellKey(r, COL_QUOTE_PRODUCT)] ?? '').trim();
+              const grade = (next[cellKey(r, COL_QUOTE_GRADE)] ?? '').trim();
               const blList = p
                 ? (blByProduct[sheetBlCompositeKey(p, grade)] ?? [])
                 : [];
@@ -3031,7 +3066,15 @@ export const QuotationSheetGrid = React.forwardRef<
             }
           };
 
-          for (const c of [5, 6, 7, 8, 11, 0] as const) {
+          for (const c of [
+            COL_QUOTE_FX_CALC,
+            COL_QUOTE_PRODUCT,
+            COL_QUOTE_GRADE,
+            COL_QUOTE_PACKING,
+            COL_QUOTE_REMARKS,
+            COL_QUOTE_MARGIN,
+            0,
+          ] as const) {
             touch(c, rowVals[c] ?? '');
           }
 
@@ -5249,20 +5292,31 @@ export const QuotationSheetGrid = React.forwardRef<
         } else if (c === COL_QUOTE_FX_CALC) {
           const cur = cells[cellKey(r, COL_QUOTE_CURRENCY)] ?? '';
           const price = cells[cellKey(r, COL_QUOTE_UNIT_PRICE)] ?? '';
-          const fx = formatQuotationFxCalcStoredValue(price, cur);
+          const fxCell = v.trim();
+          const fx =
+            fxCell ||
+            formatQuotationFxCalcStoredValue(price, cur);
           out[k] = fx || '\u00a0';
         } else if (c === COL_QUOTE_COST) {
           const cur = cells[cellKey(r, COL_QUOTE_CURRENCY)] ?? '';
           const price = cells[cellKey(r, COL_QUOTE_UNIT_PRICE)] ?? '';
           const ex = cells[cellKey(r, COL_QUOTE_EXPORT_COUNTRY)] ?? '';
-          const cost = formatQuotationCostStoredValue(price, cur, ex);
+          const fxCell = cells[cellKey(r, COL_QUOTE_FX_CALC)] ?? '';
+          const cost = formatQuotationCostStoredValue(price, cur, ex, fxCell);
           out[k] = cost || '\u00a0';
         } else if (c === COL_QUOTE_SELLING) {
           const cur = cells[cellKey(r, COL_QUOTE_CURRENCY)] ?? '';
           const price = cells[cellKey(r, COL_QUOTE_UNIT_PRICE)] ?? '';
           const ex = cells[cellKey(r, COL_QUOTE_EXPORT_COUNTRY)] ?? '';
           const m = cells[cellKey(r, COL_QUOTE_MARGIN)] ?? '';
-          const sp = formatQuotationSellingPriceStoredValue(price, cur, ex, m);
+          const fxCell = cells[cellKey(r, COL_QUOTE_FX_CALC)] ?? '';
+          const sp = formatQuotationSellingPriceStoredValue(
+            price,
+            cur,
+            ex,
+            m,
+            fxCell,
+          );
           out[k] = sp || '\u00a0';
         } else {
           out[k] = v || '\u00a0';
@@ -5342,14 +5396,17 @@ export const QuotationSheetGrid = React.forwardRef<
       if (c === COL_QUOTE_FX_CALC) {
         const cur = cells[cellKey(r, COL_QUOTE_CURRENCY)] ?? '';
         const price = cells[cellKey(r, COL_QUOTE_UNIT_PRICE)] ?? '';
-        const fx = formatQuotationFxCalcStoredValue(price, cur);
+        const fxCell = raw.trim();
+        const fx =
+          fxCell || formatQuotationFxCalcStoredValue(price, cur);
         return fx || '비어 있음';
       }
       if (c === COL_QUOTE_COST) {
         const cur = cells[cellKey(r, COL_QUOTE_CURRENCY)] ?? '';
         const price = cells[cellKey(r, COL_QUOTE_UNIT_PRICE)] ?? '';
         const ex = cells[cellKey(r, COL_QUOTE_EXPORT_COUNTRY)] ?? '';
-        const cost = formatQuotationCostStoredValue(price, cur, ex);
+        const fxCell = cells[cellKey(r, COL_QUOTE_FX_CALC)] ?? '';
+        const cost = formatQuotationCostStoredValue(price, cur, ex, fxCell);
         return cost || '비어 있음';
       }
       if (c === COL_QUOTE_SELLING) {
@@ -5357,7 +5414,14 @@ export const QuotationSheetGrid = React.forwardRef<
         const price = cells[cellKey(r, COL_QUOTE_UNIT_PRICE)] ?? '';
         const ex = cells[cellKey(r, COL_QUOTE_EXPORT_COUNTRY)] ?? '';
         const m = cells[cellKey(r, COL_QUOTE_MARGIN)] ?? '';
-        const sp = formatQuotationSellingPriceStoredValue(price, cur, ex, m);
+        const fxCell = cells[cellKey(r, COL_QUOTE_FX_CALC)] ?? '';
+        const sp = formatQuotationSellingPriceStoredValue(
+          price,
+          cur,
+          ex,
+          m,
+          fxCell,
+        );
         return sp || '비어 있음';
       }
       const t = raw.replace(/\r\n|\n|\r/g, ' ').trim();
@@ -6179,7 +6243,7 @@ export const QuotationSheetGrid = React.forwardRef<
           <span>
             <span className="font-medium text-foreground">견적 자동 계산</span>
             <span className="text-muted-foreground">
-              {' · 환율·원가·판매가'}
+              {' · 환율 계산·원가·판매가'}
             </span>
           </span>
           <Popover>
@@ -6189,7 +6253,7 @@ export const QuotationSheetGrid = React.forwardRef<
                 variant="ghost"
                 size="icon"
                 className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
-                aria-label="환율·원가·판매가 계산식 상세 보기"
+                aria-label="환율 계산·원가·판매가 계산식 상세 보기"
                 title="계산식 상세"
               >
                 <Info className="size-3.5" aria-hidden />
@@ -6215,7 +6279,9 @@ export const QuotationSheetGrid = React.forwardRef<
                     환율 계산
                   </h4>
                   <p className="mb-2 text-[11px] leading-snug text-muted-foreground">
-                    통화·단가 기준, 단가 × 배율. 해당 없으면 칸 비움.
+                    환율 계산 칸에 숫자를 넣으면 그 값을 원가·판매가에 사용합니다.
+                    비우면 통화별 고정 배율×단가로 자동 채움(BL 선택 시에도 동일).
+                    해당 없으면 칸 비움.
                   </p>
                   <ul className="space-y-1.5 border-l-2 border-primary/35 pl-2.5 text-xs leading-snug text-foreground">
                     <li>
@@ -6845,7 +6911,7 @@ export const QuotationSheetGrid = React.forwardRef<
                           foreignLockName
                             ? `${foreignLockName} 님이 편집 중`
                             : isQuotationReadonlySheetColumn(c)
-                              ? '읽기 전용 — BL 검색·마진만 입력'
+                              ? '읽기 전용 — BL 검색·환율 계산·마진 입력'
                               : undefined
                         }
                         quotationReadonlySurface={isQuotationReadonlySheetColumn(
@@ -7519,6 +7585,21 @@ export const QuotationSheetGrid = React.forwardRef<
                                                         item.packing ?? '';
                                                       next[cellKey(r, 8)] =
                                                         (item.salesNotes ?? item.notes ?? '') || '';
+                                                      next[cellKey(r, COL_QUOTE_FX_CALC)] =
+                                                        formatQuotationFxCalcStoredValue(
+                                                          next[
+                                                            cellKey(
+                                                              r,
+                                                              COL_QUOTE_UNIT_PRICE,
+                                                            )
+                                                          ] ?? '',
+                                                          next[
+                                                            cellKey(
+                                                              r,
+                                                              COL_QUOTE_CURRENCY,
+                                                            )
+                                                          ] ?? '',
+                                                        );
                                                       if (
                                                         sheetRowStringsChanged(
                                                           prev,

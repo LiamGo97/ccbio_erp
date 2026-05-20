@@ -442,6 +442,7 @@ function SalesPageContent() {
         transportFee: data.transportFee ?? null,
         advancePaymentRatio: data.advancePaymentRatio ?? null,
         advancePaymentAmount: data.advancePaymentAmount ?? null,
+        notes: data.notes?.trim() ? data.notes.trim() : null,
         registerAs: data.registerAs ?? undefined, // 예약 등록(RESERVED) / 판매 등록(SALE)
         items: (data.selectedContainers || []).map((container: any) => ({
           containerId: container.id,
@@ -493,6 +494,7 @@ function SalesPageContent() {
         transportFee: data.transportFee ?? null,
         advancePaymentRatio: data.advancePaymentRatio ?? null,
         advancePaymentAmount: data.advancePaymentAmount ?? null,
+        notes: data.notes?.trim() ? data.notes.trim() : null,
         items: (data.selectedContainers || []).map((container: any, index: number) => {
           // 기존 항목 ID는 SalesFormDrawer에서 처리하므로 여기서는 container.itemId 사용
           return {
@@ -547,6 +549,7 @@ function SalesPageContent() {
         transportFee: data.transportFee ?? null,
         advancePaymentRatio: data.advancePaymentRatio ?? null,
         advancePaymentAmount: data.advancePaymentAmount ?? null,
+        notes: data.notes?.trim() ? data.notes.trim() : null,
         items: (data.selectedContainers || []).map((container: any, index: number) => {
           // 기존 항목 ID는 SalesFormDrawer에서 처리하므로 여기서는 container.itemId 사용
           console.log(`[판매 확정] 항목 ${index + 1}:`, {
@@ -924,6 +927,24 @@ function SalesPageContent() {
         </div>
       ),
       size: 96,
+    },
+    {
+      id: 'notes',
+      accessorKey: 'notes',
+      header: '비고',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const text = row.original.notes?.trim() || '';
+        return (
+          <div
+            className="text-sm text-muted-foreground truncate max-w-[12rem]"
+            title={text || undefined}
+          >
+            {text || '-'}
+          </div>
+        );
+      },
+      size: 160,
     },
     // {
     //   id: 'totalAmount',

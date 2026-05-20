@@ -43,6 +43,76 @@ export class CustomersService {
     private readonly kakaoLocalAddressService: KakaoLocalAddressService,
   ) {}
 
+  /**
+   * 고객 목록 검색 — 전화번호는 저장 형식(하이픈 유무)과 관계없이 숫자만으로도 매칭
+   */
+  private applyCustomerSearchFilter(
+    queryBuilder: ReturnType<Repository<Customer>['createQueryBuilder']>,
+    search: string,
+    mode: 'list' | 'export' = 'list',
+  ): void {
+    const trimmed = search.trim();
+    if (!trimmed) return;
+
+    const like = `%${trimmed}%`;
+    const searchDigits = trimmed.replace(/\D/g, '');
+    const phoneDigitsLike = searchDigits.length >= 4 ? `%${searchDigits}%` : null;
+
+    queryBuilder.andWhere(
+      new Brackets((qb) => {
+        qb.where('LOWER(COALESCE(customer.companyName, \'\')) LIKE LOWER(:customerSearchLike)', {
+          customerSearchLike: like,
+        })
+          .orWhere('LOWER(COALESCE(customer.ceo, \'\')) LIKE LOWER(:customerSearchLike)', {
+            customerSearchLike: like,
+          })
+          .orWhere('LOWER(COALESCE(customer.phone, \'\')) LIKE LOWER(:customerSearchLike)', {
+            customerSearchLike: like,
+          })
+          .orWhere('LOWER(COALESCE(customer.address, \'\')) LIKE LOWER(:customerSearchLike)', {
+            customerSearchLike: like,
+          })
+          .orWhere('LOWER(COALESCE(customer.addressDetail, \'\')) LIKE LOWER(:customerSearchLike)', {
+            customerSearchLike: like,
+          })
+          .orWhere(
+            'LOWER(COALESCE(customer.businessRegistrationNumber, \'\')) LIKE LOWER(:customerSearchLike)',
+            { customerSearchLike: like },
+          )
+          .orWhere('LOWER(COALESCE(customer.remarks, \'\')) LIKE LOWER(:customerSearchLike)', {
+            customerSearchLike: like,
+          });
+
+        if (phoneDigitsLike) {
+          qb.orWhere(
+            "regexp_replace(COALESCE(customer.phone, ''), '[^0-9]', '', 'g') LIKE :customerPhoneDigitsLike",
+            { customerPhoneDigitsLike: phoneDigitsLike },
+          );
+        }
+
+        if (mode === 'list') {
+          qb.orWhere(
+            'LOWER(COALESCE(customer.residentRegistrationNumber, \'\')) LIKE LOWER(:customerSearchLike)',
+            { customerSearchLike: like },
+          )
+            .orWhere('LOWER(COALESCE(customer.refundBankName, \'\')) LIKE LOWER(:customerSearchLike)', {
+              customerSearchLike: like,
+            })
+            .orWhere('LOWER(COALESCE(customer.refundAccountNumber, \'\')) LIKE LOWER(:customerSearchLike)', {
+              customerSearchLike: like,
+            })
+            .orWhere('LOWER(COALESCE(customer.refundDepositor, \'\')) LIKE LOWER(:customerSearchLike)', {
+              customerSearchLike: like,
+            })
+            .orWhere(
+              'LOWER(COALESCE(customer.farmManagementCertFileName, \'\')) LIKE LOWER(:customerSearchLike)',
+              { customerSearchLike: like },
+            );
+        }
+      }),
+    );
+  }
+
   async create(createCustomerDto: CreateCustomerDto): Promise<Customer> {
     // ca_name을 ca_value로 변환
     const transformedDto = await this.transformNameToValue(createCustomerDto);
@@ -220,24 +290,7 @@ export class CustomersService {
     }
 
     if (search) {
-      const like = `%${search}%`;
-      queryBuilder.andWhere(
-        `(
-          LOWER(COALESCE(customer.companyName, '')) LIKE LOWER(:like)
-          OR LOWER(COALESCE(customer.ceo, '')) LIKE LOWER(:like)
-          OR LOWER(COALESCE(customer.phone, '')) LIKE LOWER(:like)
-          OR LOWER(COALESCE(customer.address, '')) LIKE LOWER(:like)
-          OR LOWER(COALESCE(customer.addressDetail, '')) LIKE LOWER(:like)
-          OR LOWER(COALESCE(customer.businessRegistrationNumber, '')) LIKE LOWER(:like)
-          OR LOWER(COALESCE(customer.remarks, '')) LIKE LOWER(:like)
-          OR LOWER(COALESCE(customer.residentRegistrationNumber, '')) LIKE LOWER(:like)
-          OR LOWER(COALESCE(customer.refundBankName, '')) LIKE LOWER(:like)
-          OR LOWER(COALESCE(customer.refundAccountNumber, '')) LIKE LOWER(:like)
-          OR LOWER(COALESCE(customer.refundDepositor, '')) LIKE LOWER(:like)
-          OR LOWER(COALESCE(customer.farmManagementCertFileName, '')) LIKE LOWER(:like)
-        )`,
-        { like },
-      );
+      this.applyCustomerSearchFilter(queryBuilder, search, 'list');
     }
 
     const total = await queryBuilder.getCount();
@@ -2763,18 +2816,7 @@ export class CustomersService {
     }
 
     if (dto.search) {
-      const like = `%${dto.search}%`;
-      queryBuilder.andWhere(
-        new Brackets((qb) => {
-          qb.where('LOWER(customer.companyName) LIKE LOWER(:like)', { like })
-            .orWhere('LOWER(customer.ceo) LIKE LOWER(:like)', { like })
-            .orWhere('LOWER(customer.phone) LIKE LOWER(:like)', { like })
-            .orWhere('LOWER(customer.address) LIKE LOWER(:like)', { like })
-            .orWhere('LOWER(customer.addressDetail) LIKE LOWER(:like)', { like })
-            .orWhere('LOWER(customer.businessRegistrationNumber) LIKE LOWER(:like)', { like })
-            .orWhere('LOWER(customer.remarks) LIKE LOWER(:like)', { like });
-        }),
-      );
+      this.applyCustomerSearchFilter(queryBuilder, dto.search, 'export');
     }
 
     if (dto.customerType) {

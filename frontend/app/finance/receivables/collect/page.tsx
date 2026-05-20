@@ -18,7 +18,10 @@ import {
   CollectionPrepaymentFilter,
 } from '@/lib/hooks/use-collections';
 import { CollectionFormDrawer } from '@/components/finance/collection-form-drawer';
-import { Plus, Loader2 } from 'lucide-react';
+import { Plus, Loader2, Filter } from 'lucide-react';
+import { useCodes, type Code } from '@/lib/hooks/use-codes';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import Cookies from 'js-cookie';
 import { DateRangePicker } from '@/components/schedules/date-range-picker';
 import { useColumnSettings } from '@/hooks/use-column-settings';
@@ -66,10 +69,47 @@ function CollectionsPageContent() {
   const [sortBy, setSortBy] = React.useState<CollectionListSortField>('collectionDate');
   const [sortOrder, setSortOrder] = React.useState<'asc' | 'desc'>('desc');
   const [prepaymentFilter, setPrepaymentFilter] = React.useState<CollectionPrepaymentFilter>('all');
+  const [smsFilterDefaultsApplied, setSmsFilterDefaultsApplied] = React.useState(false);
+  const [selectedSmsStatuses, setSelectedSmsStatuses] = React.useState<Set<string>>(new Set());
 
   React.useEffect(() => {
     auth.getCurrentUser().then(setUser);
   }, []);
+
+  const { data: statusCodes } = useCodes({ group: 'SMS_STATUS' });
+
+  const smsFilterOptions = React.useMemo(() => {
+    const isSmsStatusCode = (c: Code): c is Code & { value: string } =>
+      Boolean(c.value) && c.value !== 'NOT_APPLICABLE';
+    const fromCodes =
+      statusCodes?.data?.filter(isSmsStatusCode).map((c) => ({ value: c.value, label: c.name })) ?? [];
+    return [
+      { value: 'NONE', label: '미발송' },
+      { value: 'not_applicable', label: '해당없음' },
+      ...fromCodes,
+    ];
+  }, [statusCodes]);
+
+  const smsOptionsKey = React.useMemo(
+    () => smsFilterOptions.map((o) => o.value).sort().join('|'),
+    [smsFilterOptions],
+  );
+
+  React.useEffect(() => {
+    if (smsFilterOptions.length === 0) return;
+    setSelectedSmsStatuses(new Set(smsFilterOptions.map((o) => o.value)));
+    setSmsFilterDefaultsApplied(true);
+  }, [smsOptionsKey, smsFilterOptions]);
+
+  const smsStatusesParam = React.useMemo(() => {
+    if (smsFilterOptions.length === 0 || selectedSmsStatuses.size === smsFilterOptions.length) {
+      return undefined;
+    }
+    if (selectedSmsStatuses.size === 0) {
+      return smsFilterDefaultsApplied ? [] : undefined;
+    }
+    return Array.from(selectedSmsStatuses);
+  }, [smsFilterOptions, selectedSmsStatuses, smsFilterDefaultsApplied]);
 
   const params: GetCollectionsParams = React.useMemo(
     () => ({
@@ -81,12 +121,71 @@ function CollectionsPageContent() {
       prepaymentFilter: prepaymentFilter === 'all' ? undefined : prepaymentFilter,
       sortBy,
       sortOrder,
+      smsStatuses: smsStatusesParam,
     }),
-    [page, pageSize, search, dateRange, prepaymentFilter, sortBy, sortOrder],
+    [page, pageSize, search, dateRange, prepaymentFilter, sortBy, sortOrder, smsStatusesParam],
   );
 
   const { data, isLoading } = useCollections(params);
   const totalCollectionAmount = data?.totalCollectionAmount ?? 0;
+
+  const getSmsStatusBadge = React.useCallback(
+    (status?: string | null) => {
+      if (!status) {
+        return (
+          <Badge variant="outline" className="border-gray-500 bg-gray-50 text-gray-700 dark:border-gray-400 dark:bg-gray-950/30 dark:text-gray-300">
+            미발송
+          </Badge>
+        );
+      }
+      if (status === 'NOT_APPLICABLE') {
+        return (
+          <Badge variant="outline" className="border-slate-400 bg-slate-100 text-slate-600 dark:border-slate-500 dark:bg-slate-900/50 dark:text-slate-400">
+            해당없음
+          </Badge>
+        );
+      }
+      const statusStyles: Record<string, { variant: 'default' | 'secondary' | 'outline' | 'destructive'; className?: string }> = {
+        SENT: {
+          variant: 'outline',
+          className: 'border-green-500 bg-green-50 text-green-700 dark:border-green-400 dark:bg-green-950/30 dark:text-green-300',
+        },
+        PENDING: {
+          variant: 'outline',
+          className: 'border-gray-500 bg-gray-50 text-gray-700 dark:border-gray-400 dark:bg-gray-950/30 dark:text-gray-300',
+        },
+        FAILED: {
+          variant: 'outline',
+          className: 'border-red-500 bg-red-50 text-red-700 dark:border-red-400 dark:bg-red-950/30 dark:text-red-300',
+        },
+        CANCELLED: {
+          variant: 'outline',
+          className: 'border-red-500 bg-red-50 text-red-700 dark:border-red-400 dark:bg-red-950/30 dark:text-red-300',
+        },
+      };
+
+      const style = statusStyles[status];
+      if (!style) {
+        return (
+          <Badge variant="outline" className="border-gray-500 bg-gray-50 text-gray-700 dark:border-gray-400 dark:bg-gray-950/30 dark:text-gray-300">
+            {status}
+          </Badge>
+        );
+      }
+
+      const statusCode = statusCodes?.data?.find((code: { value?: string | null; name: string }) => code.value === status);
+      const statusLabel =
+        statusCode?.name ||
+        (status === 'SENT' ? '발송완료' : status === 'PENDING' ? '대기' : status === 'FAILED' ? '실패' : status === 'CANCELLED' ? '취소' : status);
+
+      return (
+        <Badge variant={style.variant} className={style.className}>
+          {statusLabel}
+        </Badge>
+      );
+    },
+    [statusCodes],
+  );
 
   const columns: ColumnDef<CollectionListItem>[] = React.useMemo(
     () => [
@@ -152,6 +251,13 @@ function CollectionsPageContent() {
         size: 100,
       },
       {
+        accessorKey: 'smsStatus',
+        header: 'SMS 발송 상태',
+        cell: ({ row }) => getSmsStatusBadge(row.original.smsStatus),
+        size: 120,
+        enableSorting: false,
+      },
+      {
         accessorKey: 'notes',
         header: '비고',
         cell: ({ row }) => row.original.notes ?? '-',
@@ -164,7 +270,7 @@ function CollectionsPageContent() {
         size: 120,
       },
     ],
-    [],
+    [getSmsStatusBadge],
   );
 
   const filterControls = (
@@ -213,6 +319,67 @@ function CollectionsPageContent() {
             <SelectItem value="prepayment">선수금</SelectItem>
           </SelectContent>
         </Select>
+      </div>
+      <div className="flex items-center gap-2">
+        <Label className="whitespace-nowrap text-sm font-medium text-muted-foreground">SMS 발송 상태</Label>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm" className="h-8 w-40 justify-start">
+              <Filter className="mr-2 h-4 w-4" />
+              {smsFilterOptions.length === 0
+                ? '전체'
+                : selectedSmsStatuses.size === smsFilterOptions.length
+                  ? '전체'
+                  : selectedSmsStatuses.size === 0
+                    ? '선택 안됨'
+                    : `${selectedSmsStatuses.size}개 선택됨`}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-56 max-h-[70vh] overflow-y-auto p-3" align="start">
+            <div className="space-y-2">
+              <div className="flex cursor-pointer items-center space-x-2 rounded p-2 hover:bg-muted/50">
+                <Checkbox
+                  id="collect-sms-filter-all"
+                  checked={smsFilterOptions.length === 0 || selectedSmsStatuses.size === smsFilterOptions.length}
+                  onCheckedChange={(checked: boolean) => {
+                    if (checked) setSelectedSmsStatuses(new Set(smsFilterOptions.map((o) => o.value)));
+                    else setSelectedSmsStatuses(new Set());
+                    setPage(1);
+                  }}
+                />
+                <Label htmlFor="collect-sms-filter-all" className="flex-1 cursor-pointer text-sm font-medium">
+                  전체
+                </Label>
+              </div>
+              {smsFilterOptions.map((opt) => (
+                <div
+                  key={opt.value}
+                  className="flex cursor-pointer items-center space-x-2 rounded p-2 hover:bg-muted/50"
+                >
+                  <Checkbox
+                    id={`collect-sms-filter-${opt.value.replace(/[^a-zA-Z0-9_-]/g, '_')}`}
+                    checked={selectedSmsStatuses.has(opt.value)}
+                    onCheckedChange={(checked: boolean) => {
+                      setSelectedSmsStatuses((prev) => {
+                        const next = new Set(prev);
+                        if (checked) next.add(opt.value);
+                        else next.delete(opt.value);
+                        return next;
+                      });
+                      setPage(1);
+                    }}
+                  />
+                  <Label
+                    htmlFor={`collect-sms-filter-${opt.value.replace(/[^a-zA-Z0-9_-]/g, '_')}`}
+                    className="flex-1 cursor-pointer text-sm font-medium"
+                  >
+                    {opt.label}
+                  </Label>
+                </div>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
       </div>
     </div>
   );

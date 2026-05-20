@@ -78,16 +78,23 @@ const formatNumber = (value?: number | null) => {
 function receivableCollectionToListItem(
   receivable: ReceivableDetail,
   c: ReceivableCollectionItem,
-  collectionNumber?: string | null,
+  collectionNumber: string | null | undefined,
+  customer: { companyName: string; ceo: string; phone: string } | null | undefined,
 ): CollectionListItem {
+  const companyName = customer?.companyName?.trim() || receivable.customerName || null;
+  const ceo = customer?.ceo?.trim() || null;
+  const customerName = companyName ?? ceo ?? receivable.customerName;
+  const phone = customer?.phone?.trim() || null;
+
   return {
     id: c.id,
     collectionNumber: collectionNumber ?? null,
     receivableId: receivable.id,
     customerId: receivable.customerId,
-    customerName: receivable.customerName,
-    companyName: receivable.customerName,
-    ceo: null,
+    customerName,
+    companyName,
+    ceo,
+    phone,
     collectionAmount: c.collectionAmount,
     collectionDate: c.collectionDate,
     collectionMethod: c.collectionMethod,
@@ -246,11 +253,11 @@ export function CustomerLedgerDrawer({
         return;
       }
       setCollectionFormTarget(
-        receivableCollectionToListItem(receivable, c, entry.collectionNumber ?? null),
+        receivableCollectionToListItem(receivable, c, entry.collectionNumber ?? null, customer ?? undefined),
       );
       setCollectionFormOpen(true);
     },
-    [receivableCollections, receivableId, receivable],
+    [receivableCollections, receivableId, receivable, customer],
   );
 
   const handleSavePaymentTerms = async () => {

@@ -51,6 +51,8 @@ interface SalesDetailDrawerProps {
   asPanel?: boolean;
   /** true면 읽기 전용 (수정/확정 버튼 숨김) */
   readOnly?: boolean;
+  /** 신규 판매관리만 'bl'. 기본 container = 기존 /sales 동작 */
+  productLineKey?: 'container' | 'bl';
 }
 
 const InfoRow = ({ label, value }: { label: string; value?: React.ReactNode }) => (
@@ -110,7 +112,9 @@ export function SalesDetailDrawer({
   noOverlay = false,
   asPanel = false,
   readOnly = false,
+  productLineKey = 'container',
 }: SalesDetailDrawerProps) {
+  const useBlProductLine = productLineKey === 'bl';
   const isMobile = useIsMobile();
   const router = useRouter();
   const { data, isLoading, refetch } = useSalesDetail(salesId ?? undefined);
@@ -509,6 +513,18 @@ export function SalesDetailDrawer({
                       <InfoRow label="판매일" value={formatDate(data.salesDate)} />
                       <InfoRow label="요청 차량" value={getRequestVehicleName(data.requestVehicle)} />
                       <InfoRow label="운송비" value={data.transportFee != null ? formatNumber(data.transportFee, 2) : '-'} />
+                      <div className="md:col-span-4">
+                        <InfoRow
+                          label="비고"
+                          value={
+                            data.notes?.trim() ? (
+                              <span className="whitespace-pre-wrap">{data.notes.trim()}</span>
+                            ) : (
+                              '-'
+                            )
+                          }
+                        />
+                      </div>
                       <InfoRow label="등록자" value={data.registeredByName} />
                       <InfoRow label="등록일" value={formatDate(data.createdAt)} />
                     </div>
@@ -619,8 +635,18 @@ export function SalesDetailDrawer({
                                     );
                                   })()}
                                   <span className="text-sm font-medium">
-                                    {product.containerNo}
-                                    {product.sequence != null && ` [${product.sequence}]`}
+                                    {useBlProductLine ? (
+                                      <>
+                                        {product.bl || product.bk || '-'}
+                                        {(product.packingName || product.packingType) &&
+                                          ` · ${product.packingName || product.packingType}`}
+                                      </>
+                                    ) : (
+                                      <>
+                                        {product.containerNo}
+                                        {product.sequence != null && ` [${product.sequence}]`}
+                                      </>
+                                    )}
                                   </span>
                                 </div>
                               </div>
@@ -1302,6 +1328,7 @@ export function SalesDetailDrawer({
                     transportFee: formData.transportFee ?? null,
                     advancePaymentRatio: formData.advancePaymentRatio ?? null,
                     advancePaymentAmount: formData.advancePaymentAmount ?? null,
+                    notes: formData.notes?.trim() ? formData.notes.trim() : null,
                     items: (formData.selectedContainers || []).map((container: any) => ({
                       id: container.itemId,
                       containerId: container.containerId || container.id || '',
@@ -1350,6 +1377,7 @@ export function SalesDetailDrawer({
                     transportFee: formData.transportFee ?? null,
                     advancePaymentRatio: formData.advancePaymentRatio ?? null,
                     advancePaymentAmount: formData.advancePaymentAmount ?? null,
+                    notes: formData.notes?.trim() ? formData.notes.trim() : null,
                     items: (formData.selectedContainers || []).map((container: any) => ({
                       id: container.itemId,
                       containerId: container.containerId || container.id || '',

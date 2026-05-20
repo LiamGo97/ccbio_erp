@@ -63,6 +63,9 @@ export interface Consultation {
   notes: string | null;
   managerId: number | null;
   managerName: string | null;
+  replyStatus: string | null;
+  replyAssigneeId: number | null;
+  replyAssigneeName: string | null;
   mainProduct: string | null;
   arrivalPrice: string | null;
   createdAt: string;
@@ -82,6 +85,8 @@ export interface GetConsultationsParams {
   inOut?: string;
   type?: string;
   source?: string;
+  /** tb_code CONSULTATION_REPLY_STATUS cd_value */
+  replyStatus?: string;
   managerId?: number;
   startDate?: string;
   endDate?: string;
@@ -127,6 +132,9 @@ export interface CreateConsultationPayload {
   hasHandling?: boolean;
   notes?: string;
   managerId?: number | string | null;
+  /** tb_code CONSULTATION_REPLY_STATUS cd_value */
+  replyStatus?: string | null;
+  replyAssigneeId?: number | null;
   mainProduct?: string; // 주 사용제품
   arrivalPrice?: string; // 도착가
 }

@@ -30,6 +30,14 @@ export class Consultation {
   @JoinColumn({ name: 'us_id' })
   manager?: User | null;
 
+  /** 답변 진행상태 — tb_code CONSULTATION_REPLY_STATUS 의 cd_value */
+  @Column({ name: 'co_reply_status', length: 100, nullable: true })
+  replyStatus?: string | null;
+
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'co_reply_assignee_us_id' })
+  replyAssignee?: User | null;
+
   @Column({ name: 'co_consultation_date', type: 'date', nullable: true })
   consultationDate?: Date | null;
 

@@ -77,6 +77,11 @@ export class SalesDeliveryController {
     return this.service.getSalesTransportMismatch();
   }
 
+  @Get('by-driver')
+  async findAllGroupedByDriver(@Query('search') search?: string) {
+    return this.service.findAllGroupedByDriver(search);
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.service.findOne(id);

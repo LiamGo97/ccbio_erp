@@ -49,6 +49,7 @@ import {
 } from '@/lib/hooks/use-customers';
 import { formatCustomerListDefaultAddress } from '@/lib/customer-default-address-kind';
 import { salesUnloadingMainLine } from '@/lib/sales-unloading-display';
+import { SalesDeliverySalesNotesSection } from './sales-delivery-sales-notes-section';
 
 function resolveUnloadingLineFromParts(data: {
   unloadingAddressRoad?: string;
@@ -1580,15 +1581,15 @@ export function SalesDeliveryEditDrawer({
               ) : null;
               })()}
 
-              {/* 비고 */}
+              <SalesDeliverySalesNotesSection notes={delivery?.sales?.notes} />
               <div className="border-t border-border my-6" />
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="notes">비고</Label>
+                  <Label htmlFor="notes">운송 비고</Label>
                   <Input
                     id="notes"
                     {...register('notes')}
-                    placeholder="비고 입력"
+                    placeholder="운송 비고 입력"
                   />
                 </div>
               </div>

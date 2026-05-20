@@ -219,6 +219,11 @@ export class CreateSalesDto {
   @IsEnum(['RESERVED', 'SALE'])
   registerAs?: 'RESERVED' | 'SALE';
 
+  /** 판매 비고 (운송관리에서도 표시) */
+  @IsOptional()
+  @IsString()
+  notes?: string | null;
+
   // 판매 항목
   @IsArray()
   @ValidateNested({ each: true })

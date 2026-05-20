@@ -25,6 +25,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { formatNumber } from '@/lib/utils';
 import { LoadingCompanyDeliveryEditDrawer } from './loading-company-delivery-edit-drawer';
 import { salesUnloadingMainLine } from '@/lib/sales-unloading-display';
+import { SalesDeliverySalesNotesSection } from './sales-delivery-sales-notes-section';
 
 const formatPhone = (phone?: string | null): string => {
   if (!phone) return '-';
@@ -638,7 +639,7 @@ export const LoadingCompanyDeliveryDetailDrawer: React.FC<LoadingCompanyDelivery
               </div>
             </section>
 
-            <Separator />
+            <SalesDeliverySalesNotesSection notes={data.sales?.notes} />
 
             {/* 배차 정보 */}
             <section className="space-y-2.5">

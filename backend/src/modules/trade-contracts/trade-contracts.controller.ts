@@ -379,6 +379,53 @@ export class TradeContractsController {
     return this.tradeContractsService.listFinanceInventoryPendingByBl(search, productNames, includeExcluded, dateFrom, dateTo);
   }
 
+  @Get('sales/inventory-pending')
+  async listSalesInventoryPending(@Req() req: any) {
+    const search = req.query?.search as string | undefined;
+    const productNames = parseFinanceInventoryProductNamesQuery(req.query?.productName);
+    const includeExcluded = req.query?.includeExcluded === 'true' || req.query?.includeExcluded === true;
+    const inventoryStatus = req.query?.inventoryStatus as string | undefined;
+    const invStatuses = inventoryStatus?.split(',').map((s) => s.trim()).filter(Boolean);
+    return this.tradeContractsService.listSalesInventoryPendingByBlPacking(
+      search,
+      productNames,
+      includeExcluded,
+      invStatuses?.length ? invStatuses : undefined,
+    );
+  }
+
+  @Get('sales/inventory-confirmed/sales-linked')
+  async listSalesInventoryConfirmedSalesLinked(@Req() req: any) {
+    const containerIdsParam = req.query?.containerIds as string | undefined;
+    const containerIds = containerIdsParam
+      ? containerIdsParam
+          .split(',')
+          .map((v) => v.trim())
+          .filter((v) => v.length > 0)
+      : [];
+    const orderId = (req.query?.orderId as string | undefined)?.trim() || undefined;
+    const packingType = req.query?.packingType as string | undefined;
+    return this.tradeContractsService.listSalesLinkedToContainers(containerIds, orderId, packingType);
+  }
+
+  @Get('sales/inventory-confirmed')
+  async listSalesInventoryConfirmed(@Req() req: any) {
+    const search = req.query?.search as string | undefined;
+    const productNames = parseFinanceInventoryProductNamesQuery(req.query?.productName);
+    const includeExcluded = req.query?.includeExcluded === 'true' || req.query?.includeExcluded === true;
+    const inventoryStatus = req.query?.inventoryStatus as string | undefined;
+    const returnStatus = req.query?.returnStatus as string | undefined;
+    const invStatuses = inventoryStatus?.split(',').map((s) => s.trim()).filter(Boolean);
+    const retStatuses = returnStatus?.split(',').map((s) => s.trim()).filter(Boolean);
+    return this.tradeContractsService.listSalesInventoryConfirmedByBlPacking(
+      search,
+      productNames,
+      includeExcluded,
+      invStatuses?.length ? invStatuses : undefined,
+      retStatuses?.length ? retStatuses : undefined,
+    );
+  }
+
   @Get('finance/inventory-confirmed')
   async listFinanceInventoryConfirmed(@Req() req: any) {
     const search = req.query?.search as string | undefined;

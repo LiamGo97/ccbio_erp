@@ -9,6 +9,7 @@ import { Customer } from '../customers/entities/customer.entity';
 import { CustomerStatementName } from '../customers/entities/customer-statement-name.entity';
 import { CustomerPrepayment } from '../sales/entities/customer-prepayment.entity';
 import { Supplier } from '../suppliers/entities/supplier.entity';
+import { SmsHistory } from '../sms-history/entities/sms-history.entity';
 import { ReceivablesService } from './receivables.service';
 import { ReceivablesController } from './receivables.controller';
 import { TransactionNumberGenerator } from './utils/transaction-number-generator';
@@ -31,6 +32,7 @@ import { SmsTemplatesModule } from '../sms-templates/sms-templates.module';
       CustomerStatementName,
       CustomerPrepayment,
       Supplier,
+      SmsHistory,
     ]),
   ],
   controllers: [ReceivablesController],

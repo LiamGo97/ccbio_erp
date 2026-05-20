@@ -954,12 +954,13 @@ ${greetingLine}
       return;
     }
 
-    const recipientPhone = (data as { phone?: string | null; customer?: { phone?: string | null } | null }).phone
-      ?? data?.customer?.phone;
-    if (!recipientPhone) {
+    // 문자 수신: 명세서에 저장된 수취인 전화만 사용 (고객 마스터 전화로 대체하지 않음)
+    const recipientPhoneDigits = String((data as { phone?: string | null }).phone ?? '').replace(/[^0-9]/g, '');
+    if (!recipientPhoneDigits) {
       toast({
         title: '오류',
-        description: '수신자 전화번호가 없습니다.',
+        description:
+          '거래명세서에 저장된 수취인 전화번호가 없습니다. 고객 마스터 전화로는 보내지 않습니다. 명세 수정에서 수취인 전화를 입력한 뒤 다시 시도해주세요.',
         variant: 'destructive',
       });
       return;
@@ -1045,7 +1046,7 @@ ${greetingLine}
         message: message,
         recipients: [
           {
-            phone: recipientPhone.replace(/[^0-9]/g, ''),
+            phone: recipientPhoneDigits,
             name: recipientName,
           },
         ],
@@ -2295,10 +2296,16 @@ ${greetingLine}
                         <div className="flex items-center justify-between text-xs text-muted-foreground">
                           <span>메시지 길이: {smsMessage.length}자</span>
                           <span>
-                            {((data as any)?.phone ?? data?.customer?.phone) ? (
-                              <span className="text-green-600">수신자: {formatPhone((data as any)?.phone ?? data?.customer?.phone)}</span>
+                            {String((data as any)?.phone ?? '')
+                              .replace(/[^0-9]/g, '')
+                              .length > 0 ? (
+                              <span className="text-green-600">
+                                수신자(명세 저장): {formatPhone((data as any)?.phone ?? '')}
+                              </span>
                             ) : (
-                              <span className="text-red-600">수신자 전화번호 없음</span>
+                              <span className="text-red-600">
+                                명세서에 저장된 수취인 전화 없음(고객 마스터로 대체하지 않음)
+                              </span>
                             )}
                           </span>
                         </div>
@@ -2373,7 +2380,12 @@ ${greetingLine}
             </Button>
             <Button
               variant="default"
-              disabled={!((data as any)?.phone ?? data?.customer?.phone) || !selectedSmsManagerId || isSending || !smsMessage.trim()}
+              disabled={
+                !String((data as any)?.phone ?? '').replace(/[^0-9]/g, '').length ||
+                !selectedSmsManagerId ||
+                isSending ||
+                !smsMessage.trim()
+              }
               onClick={async () => {
                 if (isSending) return;
                 const snapMessage = smsMessage;

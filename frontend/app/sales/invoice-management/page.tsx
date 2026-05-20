@@ -504,7 +504,10 @@ function InvoiceManagementPageContent() {
     }
     if (status === 'NOT_APPLICABLE') {
       return (
-        <Badge variant="outline" className="border-slate-400 bg-slate-100 text-slate-600 dark:border-slate-500 dark:bg-slate-900/50 dark:text-slate-400">
+        <Badge
+          variant="outline"
+          className="border-yellow-500 bg-yellow-50 text-yellow-700 dark:border-yellow-400 dark:bg-yellow-950/30 dark:text-yellow-300"
+        >
           해당없음
         </Badge>
       );
