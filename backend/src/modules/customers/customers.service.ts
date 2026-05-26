@@ -7,6 +7,10 @@ import { Customer } from './entities/customer.entity';
 import { CustomerOperation } from './entities/customer-operation.entity';
 import { CustomerStatementName } from './entities/customer-statement-name.entity';
 import { CustomerDeliveryAddress } from './entities/customer-delivery-address.entity';
+import { CustomerContact } from './entities/customer-contact.entity';
+import { CustomerContactItemDto } from './dto/customer-contact-item.dto';
+import { CreateCustomerContactDto } from './dto/create-customer-contact.dto';
+import { UpdateCustomerContactDto } from './dto/update-customer-contact.dto';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { ExternalCustomerSyncDto } from './dto/external-customer-sync.dto';
@@ -35,6 +39,8 @@ export class CustomersService {
     private readonly statementNameRepository: Repository<CustomerStatementName>,
     @InjectRepository(CustomerDeliveryAddress)
     private readonly deliveryAddressRepository: Repository<CustomerDeliveryAddress>,
+    @InjectRepository(CustomerContact)
+    private readonly contactRepository: Repository<CustomerContact>,
     @InjectRepository(LegalAdminMaster)
     private readonly legalAdminMasterRepository: Repository<LegalAdminMaster>,
     private readonly codesService: CodesService,
@@ -116,13 +122,18 @@ export class CustomersService {
   async create(createCustomerDto: CreateCustomerDto): Promise<Customer> {
     // ca_name을 ca_value로 변환
     const transformedDto = await this.transformNameToValue(createCustomerDto);
-    
-    // operations 분리
-    const { operations, ...customerData } = transformedDto;
-    
+
+    const gradeTrim = String((transformedDto as CreateCustomerDto).customerGrade ?? '').trim();
+    if (!gradeTrim) {
+      (transformedDto as CreateCustomerDto).customerGrade = 'GENERAL';
+    }
+
+    // operations·contacts 분리
+    const { operations, contacts, ...customerData } = transformedDto as CreateCustomerDto;
+
     const customer = this.customersRepository.create(customerData);
     const saved = await this.customersRepository.save(customer);
-    
+
     // operations 저장
     if (operations && operations.length > 0) {
       const operationEntities = operations.map((op) =>
@@ -147,6 +158,10 @@ export class CustomersService {
       isDefault: true,
     });
     await this.statementNameRepository.save(firstStatement);
+
+    if (contacts !== undefined) {
+      await this.syncCustomerContacts(saved.id, contacts);
+    }
 
     const full = await this.reloadCustomerWithRelations(saved.id);
     const transformedData = await this.transformCodeValues([full]);
@@ -207,6 +222,7 @@ export class CustomersService {
       operation,
       operationSub,
       customerType,
+      customerGrade,
       eventSmsResponded,
       sortBy = 'createdAt',
       sortOrder = 'desc',
@@ -233,6 +249,19 @@ export class CustomersService {
 
     if (customerType) {
       queryBuilder.andWhere('customer.cu_customer_type = :customerType', { customerType });
+    }
+
+    if (customerGrade) {
+      const gradeCodes = await this.codesService.findByCategory('CUSTOMER_GRADE');
+      const gradeCode = gradeCodes.find(
+        (code) => code.name === customerGrade || code.value === customerGrade,
+      );
+      const gradeValue = gradeCode?.value?.trim() || customerGrade.trim();
+      if (gradeValue) {
+        queryBuilder.andWhere('customer.customerGrade = :customerGrade', {
+          customerGrade: gradeValue,
+        });
+      }
     }
 
     if (eventSmsResponded !== undefined && eventSmsResponded !== null) {
@@ -373,6 +402,7 @@ export class CustomersService {
         'operations',
         'statementNames',
         'deliveryAddresses',
+        'contacts',
         'salesManagerUser',
       ],
     });
@@ -395,9 +425,9 @@ export class CustomersService {
     // ca_name을 ca_value로 변환 (기존 customer 정보 전달)
     const transformedDto = await this.transformNameToValue(updateCustomerDto, customer);
     
-    // operations 분리
-    const { operations, ...customerData } = transformedDto;
-    
+    // operations·contacts 분리
+    const { operations, contacts, ...customerData } = transformedDto as UpdateCustomerDto;
+
     // 주소 필드들을 명시적으로 업데이트
     if (updateCustomerDto.postalCode !== undefined) {
       customer.postalCode = updateCustomerDto.postalCode || null;
@@ -441,7 +471,11 @@ export class CustomersService {
         await this.customerOperationRepository.save(operationEntities);
       }
     }
-    
+
+    if (updateCustomerDto.contacts !== undefined) {
+      await this.syncCustomerContacts(updated.id, contacts);
+    }
+
     const full = await this.reloadCustomerWithRelations(updated.id);
     const transformedData = await this.transformCodeValues([full]);
     return transformedData[0];
@@ -505,6 +539,7 @@ export class CustomersService {
       businessRegistrationNumber: biz?.businessRegistrationNumber?.trim() || undefined,
       mallUserId: mallUserIdStr,
       customerType: '농가',
+      customerGrade: 'GENERAL',
     };
 
     const lbRaw = (body.legalBCode ?? '').trim().replace(/\s/g, '');
@@ -631,6 +666,121 @@ export class CustomersService {
       throw new NotFoundException('고객 정보를 찾을 수 없습니다.');
     }
     await this.customersRepository.remove(customer);
+  }
+
+  /**
+   * 연락처·관계 전체 동기화 (요청 목록 = 최종 상태, 이름 있는 행만 저장)
+   */
+  private async syncCustomerContacts(
+    customerId: string,
+    items: CustomerContactItemDto[] | undefined,
+  ): Promise<void> {
+    if (items === undefined) return;
+
+    const valid = items
+      .map((item) => ({
+        id: item.id?.trim() || undefined,
+        name: (item.name ?? '').trim(),
+        phone: item.phone?.trim() || null,
+        relationship: item.relationship?.trim() || null,
+      }))
+      .filter((item) => item.name.length > 0);
+
+    const existing = await this.contactRepository.find({
+      where: { customerId },
+      order: { createdAt: 'ASC' },
+    });
+
+    const keepIds = new Set(
+      valid
+        .map((v) => v.id)
+        .filter((id): id is string => !!id && /^\d+$/.test(id)),
+    );
+
+    for (const row of existing) {
+      if (!keepIds.has(row.id)) {
+        await this.contactRepository.remove(row);
+      }
+    }
+
+    for (const item of valid) {
+      if (item.id && keepIds.has(item.id)) {
+        const row = existing.find((e) => e.id === item.id);
+        if (row) {
+          row.name = item.name;
+          row.phone = item.phone;
+          row.relationship = item.relationship;
+          await this.contactRepository.save(row);
+        }
+        continue;
+      }
+      await this.contactRepository.save(
+        this.contactRepository.create({
+          customerId,
+          name: item.name,
+          phone: item.phone,
+          relationship: item.relationship,
+        }),
+      );
+    }
+  }
+
+  /** 연락처·관계 추가 */
+  async addContact(customerId: string, dto: CreateCustomerContactDto): Promise<CustomerContact> {
+    const customer = await this.customersRepository.findOne({ where: { id: customerId } });
+    if (!customer) {
+      throw new NotFoundException('고객 정보를 찾을 수 없습니다.');
+    }
+    const name = dto.name?.trim();
+    if (!name) {
+      throw new BadRequestException('이름을 입력해주세요.');
+    }
+    const entity = this.contactRepository.create({
+      customerId,
+      name,
+      phone: dto.phone?.trim() || null,
+      relationship: dto.relationship?.trim() || null,
+    });
+    return this.contactRepository.save(entity);
+  }
+
+  /** 연락처·관계 수정 */
+  async updateContact(
+    customerId: string,
+    contactId: string,
+    dto: UpdateCustomerContactDto,
+  ): Promise<CustomerContact> {
+    const existing = await this.contactRepository.findOne({
+      where: { id: contactId, customerId },
+    });
+    if (!existing) {
+      throw new NotFoundException('연락처를 찾을 수 없습니다.');
+    }
+    if (dto.name !== undefined) {
+      const name = dto.name.trim();
+      if (!name) {
+        throw new BadRequestException('이름을 입력해주세요.');
+      }
+      existing.name = name;
+    }
+    if (dto.phone !== undefined) {
+      existing.phone = dto.phone?.trim() || null;
+    }
+    if (dto.relationship !== undefined) {
+      existing.relationship = dto.relationship?.trim() || null;
+    }
+    return this.contactRepository.save(existing);
+  }
+
+  /** 연락처·관계 삭제 */
+  async removeContact(customerId: string, contactId: string): Promise<void> {
+    const existing = await this.contactRepository.findOne({
+      where: { id: contactId, customerId },
+    });
+    if (!existing) {
+      throw new NotFoundException('연락처를 찾을 수 없습니다.');
+    }
+    await this.contactRepository.remove(existing);
   }
 
   /** 발행용 이름 추가 */
@@ -1178,6 +1328,7 @@ export class CustomersService {
       chamcharmMemberCodes,
       customerTypeCodes,
       memberTypeCodes,
+      customerGradeCodes,
     ] = await Promise.all([
       this.codesService.findByCategory('SPECIES'),
       this.codesService.findByCategory('OPERATION_TYPE'),
@@ -1186,6 +1337,7 @@ export class CustomersService {
       this.codesService.findByCategory('CHAMCHARM_MEMBER_STATUS'),
       this.codesService.findByCategory('CUSTOMER_TYPE'),
       this.codesService.findByCategory('MEMBER_TYPE'),
+      this.codesService.findByCategory('CUSTOMER_GRADE'),
     ]);
 
     // 코드 값 → 코드 이름 매핑 생성
@@ -1197,6 +1349,7 @@ export class CustomersService {
       chamcharmMemberStatus: new Map(chamcharmMemberCodes.map((code) => [code.value, code.name])),
       customerType: new Map(customerTypeCodes.map((code) => [code.value, code.name])),
       memberType: new Map(memberTypeCodes.map((code) => [code.value, code.name])),
+      customerGrade: new Map(customerGradeCodes.map((code) => [code.value, code.name])),
     };
 
     // OPERATION_SUBTYPE 코드도 가져오기
@@ -1284,6 +1437,10 @@ export class CustomersService {
         transformed.memberType = codeMaps.memberType.get(customer.memberType)!;
       }
 
+      if (customer.customerGrade && codeMaps.customerGrade.has(customer.customerGrade)) {
+        transformed.customerGrade = codeMaps.customerGrade.get(customer.customerGrade)!;
+      }
+
       transformed.salesManagerUserId = customer.salesManagerUserId ?? null;
       if (customer.salesManagerUser) {
         const u = customer.salesManagerUser;
@@ -1317,6 +1474,20 @@ export class CustomersService {
         if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
         return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       });
+      const contactRows = customer.contacts ?? [];
+      const contactsSorted = [...contactRows].sort(
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      );
+      transformed.contacts = contactsSorted.map((row) => ({
+        id: row.id,
+        customerId: row.customerId,
+        name: row.name,
+        phone: row.phone,
+        relationship: row.relationship,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      }));
+
       transformed.deliveryAddresses = daSorted.map((row) => ({
         id: row.id,
         customerId: row.customerId,
@@ -1421,6 +1592,16 @@ export class CustomersService {
     if (memberTypeNeedsCodeLookup) {
       codePromises.push(this.codesService.findByCategory('MEMBER_TYPE'));
       categories.push('MEMBER_TYPE');
+    }
+
+    if (dto.customerGrade !== undefined) {
+      const cgTrim = String(dto.customerGrade ?? '').trim();
+      if (cgTrim === '') {
+        (transformed as any).customerGrade = null;
+      } else {
+        codePromises.push(this.codesService.findByCategory('CUSTOMER_GRADE'));
+        categories.push('CUSTOMER_GRADE');
+      }
     }
 
     // operations가 있으면 OPERATION_TYPE과 OPERATION_SUBTYPE 코드 가져오기
@@ -1623,6 +1804,20 @@ export class CustomersService {
       }
     }
 
+    if (dto.customerGrade !== undefined && categories.includes('CUSTOMER_GRADE')) {
+      const raw = String(dto.customerGrade).trim();
+      const idx = categories.indexOf('CUSTOMER_GRADE');
+      const codes = codeResults[idx] || [];
+      const found = codes.find(
+        (c: Code) => c.name === raw || String(c.value ?? '') === raw,
+      );
+      if (found?.value != null && String(found.value) !== '') {
+        (transformed as any).customerGrade = found.value;
+      } else if (found && (!found.value || String(found.value) === '')) {
+        (transformed as any).customerGrade = found.name;
+      }
+    }
+
     // operations 변환 (코드 이름을 값으로)
     if (dto.operations && dto.operations.length > 0 && codeMaps['OPERATION_TYPE'] && codeMaps['OPERATION_SUBTYPE']) {
       (transformed as any).operations = dto.operations.map((op) => {
@@ -1673,6 +1868,7 @@ export class CustomersService {
         'operations',
         'statementNames',
         'deliveryAddresses',
+        'contacts',
         'salesManagerUser',
       ],
     });
@@ -2746,6 +2942,55 @@ export class CustomersService {
     };
   }
 
+  /** 고객 화면 「농장/축산 정보」 — 엑셀 다운로드 한글 라벨 (프론트와 동일) */
+  private static readonly FARM_LIVESTOCK_TYPE_LABELS: Record<string, string> = {
+    HANWOO: '한우',
+    NAKWOO: '낙우',
+    YUKWOO: '육우',
+    ETC: '기타',
+  };
+
+  private static readonly FARM_OPERATION_METHOD_LABELS: Record<string, string> = {
+    BREEDING: '번식',
+    FATTENING: '비육',
+    RAISING: '육성',
+    BATCH: '일괄',
+    MILKING: '착유',
+  };
+
+  private static readonly FARM_FEEDING_METHOD_LABELS: Record<string, string> = {
+    SELF_MIX: '자가배합(배합기)',
+    DIRECT: '직접급여',
+    TMF: 'TMF',
+  };
+
+  private formatFarmCommaSeparatedCodes(
+    raw: string | null | undefined,
+    labels: Record<string, string>,
+  ): string {
+    const s = raw?.trim();
+    if (!s) return '-';
+    const text = s
+      .split(',')
+      .map((v) => v.trim())
+      .filter((v) => v.length > 0)
+      .map((v) => labels[v] || labels[v.toUpperCase()] || v)
+      .join(', ');
+    return text || '-';
+  }
+
+  private formatFarmFeedingMethod(raw: string | null | undefined): string {
+    const s = raw?.trim();
+    if (!s) return '-';
+    const key = s.toUpperCase();
+    return CustomersService.FARM_FEEDING_METHOD_LABELS[key] || s;
+  }
+
+  private formatFarmLivestockCount(count: number | null | undefined): string {
+    if (count === null || count === undefined || !Number.isFinite(count)) return '-';
+    return `${new Intl.NumberFormat('ko-KR').format(Math.trunc(count))}두`;
+  }
+
   // 엑셀 파일 생성 및 다운로드
   async exportToExcel(dto: GetCustomersDto): Promise<Buffer> {
     try {
@@ -2825,6 +3070,19 @@ export class CustomersService {
       });
     }
 
+    if (dto.customerGrade) {
+      const gradeCodes = await this.codesService.findByCategory('CUSTOMER_GRADE');
+      const gradeCode = gradeCodes.find(
+        (code) => code.name === dto.customerGrade || code.value === dto.customerGrade,
+      );
+      const gradeValue = gradeCode?.value?.trim() || dto.customerGrade.trim();
+      if (gradeValue) {
+        queryBuilder.andWhere('customer.customerGrade = :customerGrade', {
+          customerGrade: gradeValue,
+        });
+      }
+    }
+
     if (dto.eventSmsResponded !== undefined && dto.eventSmsResponded !== null) {
       queryBuilder.andWhere('customer.eventSmsResponded = :eventSmsResponded', {
         eventSmsResponded: dto.eventSmsResponded,
@@ -2894,34 +3152,41 @@ export class CustomersService {
       });
     };
 
+    const formatDefaultAddressForExcel = (customer: {
+      addressRoad?: string | null;
+      addressJibun?: string | null;
+      addressDefaultType?: string | null;
+    }): string => {
+      const road = customer.addressRoad?.trim() || '';
+      const jibun = customer.addressJibun?.trim() || '';
+      const def = (customer.addressDefaultType?.trim() || '').toUpperCase();
+      if (def === 'JIBUN' || def === 'J' || def === 'LOT') return jibun || road;
+      return road || jibun;
+    };
+
     // 엑셀 데이터 준비
     const excelData = transformedCustomers.map((customer: any) => {
-      // operations를 문자열로 변환
-      const operationsText = customer.operations
-        ?.map((op: any) => {
-          const parts = [];
-          if (op.operation) parts.push(op.operation);
-          if (op.operationSub) parts.push(op.operationSub);
-          if (op.herdSize) parts.push(`사육두수: ${op.herdSize}`);
-          return parts.join(' / ');
-        })
-        .join('; ') || '';
-
       return {
         '업체명': customer.companyName || '-',
         '대표자': customer.ceo || '-',
         '전화번호': formatPhoneForExcel(customer.phone),
-        '지역': customer.region || '-',
-        '시/군/구': customer.city || '-',
         '우편번호': customer.postalCode || '-',
-        '주소': customer.address || '-',
+        '주소': formatDefaultAddressForExcel(customer) || '-',
+        '도로명주소': customer.addressRoad?.trim() || '-',
+        '지번주소': customer.addressJibun?.trim() || '-',
         '상세주소': customer.addressDetail || '-',
-        '축종': customer.species || '-',
-        '급여방식': customer.feeding || '-',
+        '축종': this.formatFarmCommaSeparatedCodes(
+          customer.livestockTypes,
+          CustomersService.FARM_LIVESTOCK_TYPE_LABELS,
+        ),
+        '운영방식': this.formatFarmCommaSeparatedCodes(
+          customer.operationMethod,
+          CustomersService.FARM_OPERATION_METHOD_LABELS,
+        ),
+        '급여방식': this.formatFarmFeedingMethod(customer.feedingMethod),
+        '두수': this.formatFarmLivestockCount(customer.livestockCount),
         '참참상태': customer.chamchamStatus || '-',
         '신규몰참참회원': customer.chamcharmMemberStatus || '-',
-        '이벤트SMS응답': customer.eventSmsResponded ? '예' : '아니오',
-        '운영정보': operationsText,
         '비고': customer.remarks?.trim() || '-',
         '등록일': formatDateForExcel(customer.createdAt),
       };
@@ -2936,17 +3201,17 @@ export class CustomersService {
       { wch: 20 }, // 업체명
       { wch: 15 }, // 대표자
       { wch: 15 }, // 전화번호
-      { wch: 15 }, // 지역
-      { wch: 15 }, // 시/군/구
       { wch: 12 }, // 우편번호
       { wch: 40 }, // 주소
+      { wch: 40 }, // 도로명주소
+      { wch: 40 }, // 지번주소
       { wch: 30 }, // 상세주소
-      { wch: 15 }, // 종류
-      { wch: 15 }, // 사육방식
+      { wch: 18 }, // 축종
+      { wch: 20 }, // 운영방식
+      { wch: 18 }, // 급여방식
+      { wch: 12 }, // 두수
       { wch: 15 }, // 참참상태
       { wch: 16 }, // 신규몰 참참회원
-      { wch: 14 }, // 이벤트 SMS 응답
-      { wch: 40 }, // 운영정보
       { wch: 40 }, // 비고
       { wch: 15 }, // 등록일
     ];

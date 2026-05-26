@@ -13,8 +13,10 @@ import {
   RowSelectionState,
   OnChangeFn,
   useReactTable,
+  functionalUpdate,
   type Header,
   type RowData,
+  type PaginationState,
   type Table as TanstackTable,
 } from '@tanstack/react-table';
 import { Button } from '@/components/ui/button';
@@ -463,14 +465,43 @@ export function DataTable<TData, TValue>({
   }, []); // 초기 마운트 시만 실행
 
   // 페이지당 행수 변경 핸들러
-  const handlePageSizeChange = React.useCallback((newPageSize: number) => {
-    // 쿠키에 저장
-    Cookies.set(pageSizeCookieKey, String(newPageSize), { expires: 365 }); // 1년간 유지
-    onPageSizeChange?.(newPageSize);
-    onPageChange?.(1); // 페이지 크기 변경 시 첫 페이지로
-  }, [pageSizeCookieKey, onPageSizeChange, onPageChange]);
-
   const pageSize = effectivePageSize;
+
+  const [clientPage, setClientPage] = React.useState(page);
+  const [clientPageSize, setClientPageSize] = React.useState(effectivePageSize);
+
+  const usesExternalPageControl = manualPagination || onPageChange != null;
+  const activePage = usesExternalPageControl ? page : clientPage;
+  const activePageSize = usesExternalPageControl ? pageSize : clientPageSize;
+
+  React.useEffect(() => {
+    if (usesExternalPageControl) {
+      setClientPage(page);
+      setClientPageSize(pageSize);
+    }
+  }, [usesExternalPageControl, page, pageSize]);
+
+  React.useEffect(() => {
+    if (!usesExternalPageControl) {
+      setClientPageSize(effectivePageSize);
+    }
+  }, [usesExternalPageControl, effectivePageSize]);
+
+  const handlePageSizeChange = React.useCallback(
+    (newPageSize: number) => {
+      Cookies.set(pageSizeCookieKey, String(newPageSize), { expires: 365 });
+      onPageSizeChange?.(newPageSize);
+      if (!usesExternalPageControl) {
+        setClientPageSize(newPageSize);
+      }
+      if (onPageChange) {
+        onPageChange(1);
+      } else {
+        setClientPage(1);
+      }
+    },
+    [pageSizeCookieKey, onPageSizeChange, onPageChange, usesExternalPageControl],
+  );
 
   // 서버 사이드 정렬이 있으면 사용
   const serverSorting = sortBy && sortOrder ? [{ id: sortBy, desc: sortOrder === 'desc' }] : [];
@@ -496,7 +527,7 @@ export function DataTable<TData, TValue>({
       enableSorting: false,
       enableResizing: false,
       cell: ({ row }) => {
-        const baseIndex = manualPagination ? (page - 1) * pageSize + row.index : row.index;
+        const baseIndex = (activePage - 1) * activePageSize + row.index;
         let number: number;
         if (rowNumberOrder === 'asc') {
           number = baseIndex + 1;
@@ -509,7 +540,7 @@ export function DataTable<TData, TValue>({
         return <div className="text-xs text-muted-foreground">{number}</div>;
       },
     };
-  }, [showRowNumber, rowNumberWidth, rowNumberOrder, manualPagination, page, pageSize, total]);
+  }, [showRowNumber, rowNumberWidth, rowNumberOrder, activePage, activePageSize, total]);
 
   const mergedColumns = React.useMemo(() => {
     if (!rowNumberColumn) {
@@ -608,10 +639,30 @@ export function DataTable<TData, TValue>({
     enableColumnResizing: false,
     manualPagination,
     pageCount: manualPagination ? totalPages : undefined,
+    onPaginationChange: manualPagination
+      ? undefined
+      : (updater) => {
+          const prev: PaginationState = {
+            pageIndex: activePage - 1,
+            pageSize: activePageSize,
+          };
+          const next = functionalUpdate(updater, prev);
+          if (next.pageIndex !== prev.pageIndex) {
+            const newPage = next.pageIndex + 1;
+            if (onPageChange) {
+              onPageChange(newPage);
+            } else {
+              setClientPage(newPage);
+            }
+          }
+          if (next.pageSize !== prev.pageSize) {
+            handlePageSizeChange(next.pageSize);
+          }
+        },
     initialState: {
       pagination: {
-        pageSize: effectivePageSize,
-        pageIndex: page - 1,
+        pageSize: activePageSize,
+        pageIndex: activePage - 1,
       },
       sorting: serverSorting,
       rowSelection: rowSelection || {},
@@ -622,8 +673,8 @@ export function DataTable<TData, TValue>({
       columnFilters,
       rowSelection: rowSelection || {},
       pagination: {
-        pageIndex: page - 1,
-        pageSize: effectivePageSize,
+        pageIndex: activePage - 1,
+        pageSize: activePageSize,
       },
       ...(propColumnSizing !== undefined ? { columnSizing: propColumnSizing } : {}),
     },
@@ -631,6 +682,22 @@ export function DataTable<TData, TValue>({
 
   const tableRef = React.useRef(table);
   tableRef.current = table;
+
+  const resolvedTotalPages = manualPagination ? totalPages || 1 : Math.max(table.getPageCount(), 1);
+  const displayTotal = total > 0 ? total : data.length;
+  const tableRows = manualPagination ? table.getRowModel().rows : table.getPaginationRowModel().rows;
+
+  const goToPage = React.useCallback(
+    (newPage: number) => {
+      const clamped = Math.max(1, Math.min(newPage, resolvedTotalPages));
+      if (onPageChange) {
+        onPageChange(clamped);
+      } else {
+        setClientPage(clamped);
+      }
+    },
+    [resolvedTotalPages, onPageChange],
+  );
 
   const onColumnResizePointerDown = React.useCallback(
     (
@@ -928,8 +995,7 @@ export function DataTable<TData, TValue>({
             if (idxStr == null) return;
             const idx = parseInt(idxStr, 10);
             if (Number.isNaN(idx)) return;
-            const rows = table.getRowModel().rows;
-            const row = rows[idx];
+            const row = tableRows[idx];
             const rowData = row?.original;
             if (rowData == null) return;
             const sel = typeof window !== 'undefined' ? window.getSelection() : null;
@@ -1077,8 +1143,8 @@ export function DataTable<TData, TValue>({
                     로딩 중...
                   </TableCell>
                 </TableRow>
-              ) : table.getRowModel().rows?.length ? (
-                table.getRowModel().rows.map((row) => (
+              ) : tableRows?.length ? (
+                tableRows.map((row) => (
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && 'selected'}
@@ -1192,14 +1258,14 @@ export function DataTable<TData, TValue>({
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <span>페이지당 행 수:</span>
             <Select
-              value={`${pageSize}`}
+              value={`${activePageSize}`}
               onValueChange={(value) => {
                 const newPageSize = Number(value);
                 handlePageSizeChange(newPageSize);
               }}
             >
               <SelectTrigger size="sm" className="w-[70px]">
-                <SelectValue placeholder={pageSize} />
+                <SelectValue placeholder={activePageSize} />
               </SelectTrigger>
               <SelectContent side="top">
                 {[10, 20, 30, 50, 100].map((size) => (
@@ -1210,9 +1276,9 @@ export function DataTable<TData, TValue>({
               </SelectContent>
             </Select>
             <span className="ml-4">
-              총 {total}개 중{' '}
-              {total > 0 ? (page - 1) * pageSize + 1 : 0}-
-              {Math.min(page * pageSize, total)}{' '}
+              총 {displayTotal}개 중{' '}
+              {displayTotal > 0 ? (activePage - 1) * activePageSize + 1 : 0}-
+              {Math.min(activePage * activePageSize, displayTotal)}{' '}
               개 표시
             </span>
           </div>
@@ -1221,8 +1287,8 @@ export function DataTable<TData, TValue>({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => onPageChange?.(1)}
-                disabled={page <= 1}
+                onClick={() => goToPage(1)}
+                disabled={activePage <= 1}
                 className="h-8 w-8 p-0"
               >
                 <ChevronsLeft className="h-4 w-4" />
@@ -1230,22 +1296,22 @@ export function DataTable<TData, TValue>({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => onPageChange?.(page - 1)}
-                disabled={page <= 1}
+                onClick={() => goToPage(activePage - 1)}
+                disabled={activePage <= 1}
                 className="h-8 w-8 p-0"
               >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
               <div className="flex items-center gap-1 px-2">
                 <span className="text-sm font-medium">
-                  {page} / {totalPages || 1}
+                  {activePage} / {resolvedTotalPages}
                 </span>
               </div>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => onPageChange?.(page + 1)}
-                disabled={page >= totalPages}
+                onClick={() => goToPage(activePage + 1)}
+                disabled={activePage >= resolvedTotalPages}
                 className="h-8 w-8 p-0"
               >
                 <ChevronRight className="h-4 w-4" />
@@ -1253,8 +1319,8 @@ export function DataTable<TData, TValue>({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => onPageChange?.(totalPages)}
-                disabled={page >= totalPages}
+                onClick={() => goToPage(resolvedTotalPages)}
+                disabled={activePage >= resolvedTotalPages}
                 className="h-8 w-8 p-0"
               >
                 <ChevronsRight className="h-4 w-4" />

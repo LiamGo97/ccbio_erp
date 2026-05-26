@@ -52,6 +52,17 @@ import {
 import { toast } from '@/components/ui/use-toast';
 import { InvoiceDetailDrawer } from '@/components/sales/invoice-detail-drawer';
 import { formatSalesManagerDisplay } from '@/lib/format-sales-manager';
+import Cookies from 'js-cookie';
+
+const getInitialLedgerPageSize = () => {
+  if (typeof window === 'undefined') return 20;
+  const saved = Cookies.get('data-table-page-size');
+  if (saved) {
+    const parsed = parseInt(saved, 10);
+    if (!isNaN(parsed) && [10, 20, 30, 50, 100].includes(parsed)) return parsed;
+  }
+  return 20;
+};
 
 const formatDate = (value?: string | null) => {
   if (!value) return '-';
@@ -118,6 +129,8 @@ export function CustomerLedgerDrawer({
   receivableId,
 }: CustomerLedgerDrawerProps) {
   const [dateRange, setDateRange] = React.useState<{ start?: Date; end?: Date }>({});
+  const [ledgerPage, setLedgerPage] = React.useState(1);
+  const [ledgerPageSize, setLedgerPageSize] = React.useState(getInitialLedgerPageSize);
   const [paymentTermsType, setPaymentTermsType] = React.useState<
     'DAYS' | 'THIS_MONTH_DAY' | 'NEXT_MONTH_DAY' | 'THIS_MONTH_END' | 'NEXT_MONTH_END'
   >('DAYS');
@@ -133,6 +146,21 @@ export function CustomerLedgerDrawer({
     startDate: dateRange.start?.toISOString().slice(0, 10),
     endDate: dateRange.end?.toISOString().slice(0, 10),
   });
+
+  const ledgerEntries = ledger?.entries ?? [];
+  const ledgerTotal = ledgerEntries.length;
+  const ledgerTotalPages = Math.max(1, Math.ceil(ledgerTotal / ledgerPageSize) || 1);
+
+  React.useEffect(() => {
+    if (!open) return;
+    setLedgerPage(1);
+  }, [open, customerId, dateRange.start, dateRange.end]);
+
+  React.useEffect(() => {
+    if (ledgerPage > ledgerTotalPages) {
+      setLedgerPage(ledgerTotalPages);
+    }
+  }, [ledgerPage, ledgerTotalPages]);
   const updatePaymentTermsMutation = useUpdatePaymentTerms();
   const updateReceivableNotesMutation = useUpdateReceivableNotes();
   const updateIssuedAtMutation = useUpdateInvoiceIssuedAt();
@@ -839,10 +867,18 @@ export function CustomerLedgerDrawer({
               </div>
             ) : (
               <DataTable
+                key={`${customerId ?? ''}-${dateRange.start?.toISOString() ?? ''}-${dateRange.end?.toISOString() ?? ''}`}
                 columns={columns}
-                data={ledger?.entries ?? []}
-                total={(ledger?.entries ?? []).length}
-                totalPages={1}
+                data={ledgerEntries}
+                page={ledgerPage}
+                total={ledgerTotal}
+                totalPages={ledgerTotalPages}
+                onPageChange={setLedgerPage}
+                pageSize={ledgerPageSize}
+                onPageSizeChange={(size) => {
+                  setLedgerPageSize(size);
+                  setLedgerPage(1);
+                }}
                 isLoading={isLoading}
                 showRowNumber
                 rowClassName="h-10"

@@ -6346,6 +6346,89 @@ ${appendedNote}`
   }
 
   /**
+   * Cloud Scheduler — 물류관리 기본 필터와 동일한 대상으로 ETA 일괄 갱신.
+   * CRON_ETA_UPDATE_MAX_ORDERS(숫자)로 1회 최대 건수 제한 가능 (0이면 제한 없음).
+   */
+  async runScheduledEtaUpdate(): Promise<{
+    total: number;
+    success: number;
+    failed: number;
+    results: EtaUpdateBatchResultItem[];
+    batchId: number | null;
+    skippedNoBkBl: number;
+    message?: string;
+  }> {
+    const defaultTradeStatuses = ['BOOKING', 'DOCUMENTS', 'DO'] as const;
+    const filterParams: Record<string, unknown> = {
+      source: 'cloud_scheduler',
+      bookingOnly: true,
+      tradeStatuses: [...defaultTradeStatuses],
+      includeExcluded: false,
+    };
+
+    const orders = await this.listTradeOrders(
+      undefined,
+      undefined,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      [...defaultTradeStatuses],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      false,
+      undefined,
+    );
+
+    const allIds = orders
+      .map((row) => {
+        const id = row?.id != null ? String(row.id) : '';
+        const bk = (row as { bk?: string | null }).bk?.trim() ?? '';
+        const bl = (row as { bl?: string | null }).bl?.trim() ?? '';
+        if (!id || (!bk && !bl)) return null;
+        return id;
+      })
+      .filter((id): id is string => !!id);
+
+    const skippedNoBkBl = Math.max(0, orders.length - allIds.length);
+
+    const maxRaw = parseInt(process.env.CRON_ETA_UPDATE_MAX_ORDERS ?? '0', 10);
+    const orderIds =
+      Number.isFinite(maxRaw) && maxRaw > 0 ? allIds.slice(0, maxRaw) : allIds;
+
+    if (maxRaw > 0 && allIds.length > maxRaw) {
+      filterParams.maxOrdersApplied = maxRaw;
+      filterParams.totalEligible = allIds.length;
+    }
+
+    if (orderIds.length === 0) {
+      this.logger.log('[runScheduledEtaUpdate] 갱신 대상 주문 없음');
+      return {
+        total: 0,
+        success: 0,
+        failed: 0,
+        results: [],
+        batchId: null,
+        skippedNoBkBl,
+        message: '갱신 대상 주문이 없습니다 (BK/BL 없음 또는 필터 결과 0건).',
+      };
+    }
+
+    this.logger.log(
+      `[runScheduledEtaUpdate] ${orderIds.length}건 ETA 갱신 시작 (후보 ${allIds.length}건, BK/BL 없음 스킵 ${skippedNoBkBl}건)`,
+    );
+
+    const batch = await this.batchEtaUpdate(orderIds, undefined, 'SCHEDULER', filterParams);
+    return { ...batch, skippedNoBkBl };
+  }
+
+  /**
    * 여러 주문에 대해 선적 조회를 실행하여 ETA·선사 정보를 일괄 갱신합니다.
    * 프론트엔드 수동 실행 및 Cloud Scheduler 호출용.
    * 이력을 tb_eta_update_batch에 저장 (언제, 누가, 어떤 주문, 변경 여부·before/after).

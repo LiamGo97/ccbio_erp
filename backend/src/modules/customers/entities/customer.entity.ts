@@ -14,6 +14,7 @@ import { City } from '../../cities/entities/city.entity';
 import { CustomerOperation } from './customer-operation.entity';
 import { CustomerStatementName } from './customer-statement-name.entity';
 import { CustomerDeliveryAddress } from './customer-delivery-address.entity';
+import { CustomerContact } from './customer-contact.entity';
 import { User } from '../../users/entities/user.entity';
 
 @Entity({ name: 'tb_customer' })
@@ -109,6 +110,10 @@ export class Customer {
   @Column({ name: 'cu_member_type', type: 'varchar', length: 20, nullable: true })
   memberType?: string | null;
 
+  /** 회원등급 — tb_code 그룹 CUSTOMER_GRADE (A, B, GENERAL, MALICIOUS 등 cd_value 저장) */
+  @Column({ name: 'cu_customer_grade', type: 'varchar', length: 50, nullable: true, default: 'GENERAL' })
+  customerGrade?: string | null;
+
   /** 사업자등록번호 (하이픈 포함 가능) */
   @Column({ name: 'cu_business_registration_number', type: 'varchar', length: 20, nullable: true })
   businessRegistrationNumber?: string | null;
@@ -181,6 +186,10 @@ export class Customer {
   /** 배송(납품) 주소록 */
   @OneToMany(() => CustomerDeliveryAddress, (a) => a.customer)
   deliveryAddresses?: CustomerDeliveryAddress[];
+
+  /** 추가 연락처·관계 (대표자/연락처 cu_ceo·cu_phone 과 별도) */
+  @OneToMany(() => CustomerContact, (c) => c.customer)
+  contacts?: CustomerContact[];
 }
 
 

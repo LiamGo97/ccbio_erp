@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { CustomerOperationDto } from './customer-operation.dto';
+import { CustomerContactItemDto } from './customer-contact-item.dto';
 
 export class CreateCustomerDto {
   @IsString()
@@ -132,6 +133,12 @@ export class CreateCustomerDto {
   @MaxLength(20)
   memberType?: string;
 
+  /** 회원등급 — tb_code CUSTOMER_GRADE (표시명 또는 cd_value) */
+  @IsString()
+  @IsOptional()
+  @MaxLength(50)
+  customerGrade?: string;
+
   @IsString()
   @IsOptional()
   @MaxLength(20)
@@ -214,6 +221,13 @@ export class CreateCustomerDto {
   @ValidateNested({ each: true })
   @Type(() => CustomerOperationDto)
   operations?: CustomerOperationDto[]; // 운영방식 배열
+
+  /** 연락처·관계 목록 (저장 시 전체 동기화) */
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => CustomerContactItemDto)
+  contacts?: CustomerContactItemDto[];
 }
 
 

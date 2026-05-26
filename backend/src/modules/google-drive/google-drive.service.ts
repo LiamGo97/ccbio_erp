@@ -913,15 +913,10 @@ export class GoogleDriveService {
       companyName: string;
       ceo: string;
       phone: string;
-      region: string;
-      city: string;
-      address: string;
+      addressLine: string;
       addressDetail: string;
       postalCode: string;
-      species: string;
-      feeding: string;
       chamchamStatus: string;
-      operations: string;
     }>,
     sheetGid?: string,
   ) {
@@ -958,7 +953,7 @@ export class GoogleDriveService {
       const headers = [
         '', // A열: 빈 칸
         '순번', // B열: 순번
-        '시/도', // C열: 지역정보
+        '주소', // C열: 기본 주소(도로명/지번)
         '상세주소', // D열: 상세주소
         '업체명', // E열: 업체명
         '대표자', // F열: 대표자
@@ -969,8 +964,8 @@ export class GoogleDriveService {
       const rows = customers.map((customer, index) => [
         '', // A열: 빈 칸
         index + 1, // B열: 순번 (1부터 시작)
-        customer.region || '', // C열: 시/도 (지역정보)
-        customer.address || customer.addressDetail || '', // D열: 상세주소 (주소가 있으면 주소, 없으면 상세주소)
+        customer.addressLine || '', // C열: 기본 주소
+        customer.addressDetail || '', // D열: 상세주소
         customer.companyName || '', // E열: 업체명
         customer.ceo || '', // F열: 대표자
         customer.phone || '', // G열: 연락처

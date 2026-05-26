@@ -7,6 +7,7 @@ import { Customer } from './entities/customer.entity';
 import { CustomerOperation } from './entities/customer-operation.entity';
 import { CustomerStatementName } from './entities/customer-statement-name.entity';
 import { CustomerDeliveryAddress } from './entities/customer-delivery-address.entity';
+import { CustomerContact } from './entities/customer-contact.entity';
 import { CodesModule } from '../codes/codes.module';
 import { RegionsModule } from '../regions/regions.module';
 import { CitiesModule } from '../cities/cities.module';
@@ -20,6 +21,7 @@ import { User } from '../users/entities/user.entity';
       CustomerOperation,
       CustomerStatementName,
       CustomerDeliveryAddress,
+      CustomerContact,
       LegalAdminMaster,
       User,
     ]),

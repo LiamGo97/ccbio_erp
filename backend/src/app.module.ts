@@ -45,6 +45,7 @@ import { SheetPresenceModule } from './modules/sheet-presence/sheet-presence.mod
 import { SalesReservationSheetModule } from './modules/sales-reservation-sheet/sales-reservation-sheet.module';
 import { QuotationSheetModule } from './modules/quotation-sheet/quotation-sheet.module';
 import { LegalAdminMasterModule } from './modules/legal-admin-master/legal-admin-master.module';
+import { InternalCronModule } from './modules/internal-cron/internal-cron.module';
 
 @Module({
   imports: [
@@ -126,6 +127,7 @@ import { LegalAdminMasterModule } from './modules/legal-admin-master/legal-admin
     QuotationSheetModule,
     LegalAdminMasterModule,
     SheetPresenceModule,
+    InternalCronModule,
   ],
 })
 export class AppModule {}

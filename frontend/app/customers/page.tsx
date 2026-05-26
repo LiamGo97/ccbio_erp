@@ -33,7 +33,6 @@ import {
 } from '@/lib/hooks/use-customers';
 import { formatCustomerListDefaultAddress } from '@/lib/customer-default-address-kind';
 import { formatSalesManagerDisplay } from '@/lib/format-sales-manager';
-import { useRegions } from '@/lib/hooks/use-regions';
 import { useCodesByCategory } from '@/lib/hooks/use-codes';
 import { CustomerFormDrawer } from '@/components/customers/customer-form-drawer';
 import { CustomerDetailDrawer } from '@/components/customers/customer-detail-drawer';
@@ -101,6 +100,17 @@ const OPERATION_METHOD_LABELS: Record<string, string> = {
   MILKING: '착유',
 };
 
+const FEEDING_METHOD_LABELS: Record<string, string> = {
+  SELF_MIX: '자가배합(배합기)',
+  DIRECT: '직접급여',
+  TMF: 'TMF',
+};
+
+const formatLivestockCount = (count?: number | null) => {
+  if (count === undefined || count === null || Number.isNaN(Number(count))) return '-';
+  return `${new Intl.NumberFormat('ko-KR').format(count)}두`;
+};
+
 /** ISO 문자열이 타임존 없이 오면 UTC로 간주 (운송관리·물류관리와 동일) */
 const parseAsUtcIfNeeded = (value: string): string => {
   const s = String(value).trim();
@@ -145,14 +155,11 @@ export default function CustomersPage() {
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(getInitialPageSize);
   const [search, setSearch] = React.useState('');
-  const [selectedRegion, setSelectedRegion] = React.useState('__all__');
-  const [selectedSpecies, setSelectedSpecies] = React.useState('__all__');
-  const [selectedOperation, setSelectedOperation] = React.useState('__all__');
   const [selectedChamcham, setSelectedChamcham] = React.useState('__all__');
   const [selectedCustomerType, setSelectedCustomerType] = React.useState('__all__');
-  const [selectedEventSms, setSelectedEventSms] = React.useState<'__all__' | 'true' | 'false'>('__all__');
+  const [selectedCustomerGrade, setSelectedCustomerGrade] = React.useState('__all__');
   const [sortBy, setSortBy] = React.useState<
-    'createdAt' | 'updatedAt' | 'companyName' | 'customerType' | 'eventSmsResponded' | 'consultationCount'
+    'createdAt' | 'updatedAt' | 'companyName' | 'customerType' | 'consultationCount'
   >('createdAt');
   const [sortOrder, setSortOrder] = React.useState<'asc' | 'desc'>('desc');
 
@@ -160,36 +167,10 @@ export default function CustomersPage() {
     auth.getCurrentUser().then(setUser);
   }, []);
 
-  const { data: regions } = useRegions();
-  const { data: speciesCodes } = useCodesByCategory('SPECIES');
-  const { data: operationCodes } = useCodesByCategory('OPERATION_TYPE');
   const { data: chamchamCodes } = useCodesByCategory('CHAMCHAM_STATUS');
   const { data: chamcharmMemberCodes } = useCodesByCategory('CHAMCHARM_MEMBER_STATUS');
   const { data: customerTypeCodes } = useCodesByCategory('CUSTOMER_TYPE');
-
-  const speciesMap = React.useMemo(() => {
-    const map = new Map<string, string>();
-    (speciesCodes ?? []).forEach((code) => {
-      const key = (code.value ?? code.name ?? '').trim();
-      const label = (code.name ?? code.value ?? '').trim();
-      if (key) {
-        map.set(key, label || key);
-      }
-    });
-    return map;
-  }, [speciesCodes]);
-
-  const operationMap = React.useMemo(() => {
-    const map = new Map<string, string>();
-    (operationCodes ?? []).forEach((code) => {
-      const key = (code.value ?? code.name ?? '').trim();
-      const label = (code.name ?? code.value ?? '').trim();
-      if (key) {
-        map.set(key, label || key);
-      }
-    });
-    return map;
-  }, [operationCodes]);
+  const { data: customerGradeCodes } = useCodesByCategory('CUSTOMER_GRADE');
 
   const chamchamMap = React.useMemo(() => {
     const map = new Map<string, string>();
@@ -227,34 +208,30 @@ export default function CustomersPage() {
     return map;
   }, [customerTypeCodes]);
 
+  const customerGradeMap = React.useMemo(() => {
+    const map = new Map<string, string>();
+    (customerGradeCodes ?? []).forEach((code) => {
+      const label = (code.name ?? code.value ?? '').trim();
+      const value = (code.value ?? '').trim();
+      const name = (code.name ?? '').trim();
+      if (value) map.set(value, label || value);
+      if (name) map.set(name, label || name);
+    });
+    return map;
+  }, [customerGradeCodes]);
+
   const params = React.useMemo(
     () => ({
       search: search.trim() || undefined,
-      region: selectedRegion !== '__all__' ? selectedRegion : undefined,
-      species: selectedSpecies !== '__all__' ? selectedSpecies : undefined,
-      operation: selectedOperation !== '__all__' ? selectedOperation : undefined,
       chamchamStatus: selectedChamcham !== '__all__' ? selectedChamcham : undefined,
       customerType: selectedCustomerType !== '__all__' ? selectedCustomerType : undefined,
-      eventSmsResponded:
-        selectedEventSms === '__all__' ? undefined : selectedEventSms === 'true',
+      customerGrade: selectedCustomerGrade !== '__all__' ? selectedCustomerGrade : undefined,
       page,
       limit: pageSize,
       sortBy,
       sortOrder,
     }),
-    [
-      search,
-      selectedRegion,
-      selectedSpecies,
-      selectedOperation,
-      selectedChamcham,
-      selectedCustomerType,
-      selectedEventSms,
-      page,
-      pageSize,
-      sortBy,
-      sortOrder,
-    ],
+    [search, selectedChamcham, selectedCustomerType, selectedCustomerGrade, page, pageSize, sortBy, sortOrder],
   );
 
   const { data, isLoading, refetch } = useCustomers(params);
@@ -445,19 +422,8 @@ export default function CustomersPage() {
         size: 260,
       },
       {
-        accessorKey: 'species',
-        header: '축종',
-        enableSorting: false,
-        cell: ({ row }) => (
-          <div className="text-sm">
-            {labelOr(speciesMap, row.original.species) || '-'}
-          </div>
-        ),
-        size: 120,
-      },
-      {
         accessorKey: 'livestockTypes',
-        header: '신규 축종',
+        header: '축종',
         enableSorting: false,
         cell: ({ row }) => {
           const raw = row.original.livestockTypes?.trim();
@@ -475,24 +441,8 @@ export default function CustomersPage() {
         size: 140,
       },
       {
-        accessorKey: 'operation',
-        header: '운영방식',
-        enableSorting: false,
-        cell: ({ row }) => {
-          const ops = row.original.operations;
-          if (ops && ops.length > 0) {
-            const text = ops
-              .map((op) => labelOr(operationMap, op.operation) || op.operation || '-')
-              .join(', ');
-            return <div className="text-sm">{text}</div>;
-          }
-          return <div className="text-sm">{labelOr(operationMap, row.original.operation) || '-'}</div>;
-        },
-        size: 160,
-      },
-      {
         accessorKey: 'operationMethod',
-        header: '신규 운영방식',
+        header: '운영방식',
         enableSorting: false,
         cell: ({ row }) => {
           const raw = row.original.operationMethod?.trim();
@@ -514,22 +464,44 @@ export default function CustomersPage() {
         size: 160,
       },
       {
-        id: 'operationSubLegacy',
-        header: '세부 유형',
+        accessorKey: 'feedingMethod',
+        header: '급여방식',
         enableSorting: false,
         cell: ({ row }) => {
-          const ops = row.original.operations;
-          if (ops && ops.length > 0) {
-            const text = ops.map((op) => op.operationSub?.trim() || '-').join(', ');
-            return (
-              <div className="text-sm max-w-[min(200px,28vw)] truncate" title={text}>
-                {text}
-              </div>
-            );
+          const raw = row.original.feedingMethod?.trim();
+          if (!raw) {
+            return <div className="text-sm">-</div>;
           }
-          return <div className="text-sm">-</div>;
+          const text = FEEDING_METHOD_LABELS[raw] || raw;
+          return (
+            <div className="text-sm max-w-[min(160px,24vw)] truncate" title={text}>
+              {text}
+            </div>
+          );
         },
-        size: 160,
+        size: 130,
+      },
+      {
+        accessorKey: 'livestockCount',
+        header: '두수',
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="text-sm tabular-nums whitespace-nowrap">
+            {formatLivestockCount(row.original.livestockCount)}
+          </div>
+        ),
+        size: 72,
+      },
+      {
+        accessorKey: 'customerGrade',
+        header: '회원등급',
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="text-sm whitespace-nowrap">
+            {labelOr(customerGradeMap, row.original.customerGrade) || '-'}
+          </div>
+        ),
+        size: 88,
       },
       {
         id: 'chamchamStatus',
@@ -556,20 +528,6 @@ export default function CustomersPage() {
           );
         },
         size: 120,
-      },
-      {
-        accessorKey: 'eventSmsResponded',
-        header: '이벤트 SMS',
-        enableSorting: true,
-        cell: ({ row }) =>
-          row.original.eventSmsResponded ? (
-            <Badge variant="outline" className="border-green-600/50 bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-200">
-              응답
-            </Badge>
-          ) : (
-            <span className="text-xs text-muted-foreground">-</span>
-          ),
-        size: 110,
       },
       {
         accessorKey: 'consultationCount',
@@ -613,18 +571,11 @@ export default function CustomersPage() {
         size: 140,
       },
     ];
-  }, [speciesMap, operationMap, chamchamMap, chamcharmMemberMap, customerTypeMap]);
+  }, [chamchamMap, chamcharmMemberMap, customerTypeMap, customerGradeMap]);
 
   const sortableColumns = React.useMemo(
     () =>
-      new Set([
-        'companyName',
-        'createdAt',
-        'updatedAt',
-        'customerType',
-        'eventSmsResponded',
-        'consultationCount',
-      ]),
+      new Set(['companyName', 'createdAt', 'updatedAt', 'customerType', 'consultationCount']),
     [],
   );
 
@@ -637,7 +588,6 @@ export default function CustomersPage() {
           | 'updatedAt'
           | 'companyName'
           | 'customerType'
-          | 'eventSmsResponded'
           | 'consultationCount',
       );
       setSortOrder(order);
@@ -664,80 +614,6 @@ export default function CustomersPage() {
         />
       </div>
       <div className="flex w-full items-center gap-2 md:w-auto">
-        <Label className="whitespace-nowrap text-sm font-medium text-muted-foreground">지역</Label>
-        <Select
-          value={selectedRegion}
-          onValueChange={(value) => {
-            setSelectedRegion(value);
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-40" size="sm">
-            <SelectValue placeholder="지역 선택" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">전체</SelectItem>
-            {(regions ?? []).map((region) => (
-              <SelectItem key={region.id} value={region.name}>
-                {region.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="flex w-full items-center gap-2 md:w-auto">
-        <Label className="whitespace-nowrap text-sm font-medium text-muted-foreground">축종</Label>
-        <Select
-          value={selectedSpecies}
-          onValueChange={(value) => {
-            setSelectedSpecies(value);
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-40" size="sm">
-            <SelectValue placeholder="축종 선택" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">전체</SelectItem>
-            {(speciesCodes ?? []).map((code) => {
-              const key = (code.value ?? code.name ?? '').trim();
-              if (!key) return null;
-              return (
-                <SelectItem key={key} value={key}>
-                  {code.name ?? code.value ?? key}
-                </SelectItem>
-              );
-            })}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="flex w-full items-center gap-2 md:w-auto">
-        <Label className="whitespace-nowrap text-sm font-medium text-muted-foreground">운영방식</Label>
-        <Select
-          value={selectedOperation}
-          onValueChange={(value) => {
-            setSelectedOperation(value);
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-40" size="sm">
-            <SelectValue placeholder="운영 선택" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">전체</SelectItem>
-            {(operationCodes ?? []).map((code) => {
-              const key = (code.value ?? code.name ?? '').trim();
-              if (!key) return null;
-              return (
-                <SelectItem key={key} value={key}>
-                  {code.name ?? code.value ?? key}
-                </SelectItem>
-              );
-            })}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="flex w-full items-center gap-2 md:w-auto">
         <Label className="whitespace-nowrap text-sm font-medium text-muted-foreground">구분</Label>
         <Select
           value={selectedCustomerType}
@@ -752,6 +628,32 @@ export default function CustomersPage() {
           <SelectContent>
             <SelectItem value="__all__">전체</SelectItem>
             {(customerTypeCodes ?? []).map((code) => {
+              const key = (code.value ?? code.name ?? '').trim();
+              if (!key) return null;
+              return (
+                <SelectItem key={key} value={key}>
+                  {code.name ?? code.value ?? key}
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex w-full items-center gap-2 md:w-auto">
+        <Label className="whitespace-nowrap text-sm font-medium text-muted-foreground">회원등급</Label>
+        <Select
+          value={selectedCustomerGrade}
+          onValueChange={(value) => {
+            setSelectedCustomerGrade(value);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className="w-32" size="sm">
+            <SelectValue placeholder="등급" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">전체</SelectItem>
+            {(customerGradeCodes ?? []).map((code) => {
               const key = (code.value ?? code.name ?? '').trim();
               if (!key) return null;
               return (
@@ -786,25 +688,6 @@ export default function CustomersPage() {
                 </SelectItem>
               );
             })}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="flex w-full items-center gap-2 md:w-auto">
-        <Label className="whitespace-nowrap text-sm font-medium text-muted-foreground">이벤트 SMS</Label>
-        <Select
-          value={selectedEventSms}
-          onValueChange={(value) => {
-            setSelectedEventSms(value as '__all__' | 'true' | 'false');
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-40" size="sm">
-            <SelectValue placeholder="응답 여부" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">전체</SelectItem>
-            <SelectItem value="true">응답함</SelectItem>
-            <SelectItem value="false">미응답</SelectItem>
           </SelectContent>
         </Select>
       </div>

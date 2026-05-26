@@ -25,6 +25,8 @@ import { CreateStatementNameDto } from './dto/create-statement-name.dto';
 import { UpdateStatementNameDto } from './dto/update-statement-name.dto';
 import { CreateCustomerDeliveryAddressDto } from './dto/create-customer-delivery-address.dto';
 import { UpdateCustomerDeliveryAddressDto } from './dto/update-customer-delivery-address.dto';
+import { CreateCustomerContactDto } from './dto/create-customer-contact.dto';
+import { UpdateCustomerContactDto } from './dto/update-customer-contact.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @Controller('customers')
@@ -192,6 +194,25 @@ export class CustomersController {
   @Delete(':id/delivery-addresses/:cdaId')
   removeDeliveryAddress(@Param('id') id: string, @Param('cdaId') cdaId: string) {
     return this.customersService.removeDeliveryAddress(id, cdaId);
+  }
+
+  @Post(':id/contacts')
+  addContact(@Param('id') id: string, @Body() dto: CreateCustomerContactDto) {
+    return this.customersService.addContact(id, dto);
+  }
+
+  @Patch(':id/contacts/:cctId')
+  updateContact(
+    @Param('id') id: string,
+    @Param('cctId') cctId: string,
+    @Body() dto: UpdateCustomerContactDto,
+  ) {
+    return this.customersService.updateContact(id, cctId, dto);
+  }
+
+  @Delete(':id/contacts/:cctId')
+  removeContact(@Param('id') id: string, @Param('cctId') cctId: string) {
+    return this.customersService.removeContact(id, cctId);
   }
 }
 

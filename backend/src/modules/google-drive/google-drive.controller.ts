@@ -136,34 +136,29 @@ export class GoogleDriveController {
       limit: 10000, // 충분히 큰 수
     });
 
-    // 고객 데이터를 시트 형식으로 변환
-    const sheetData = customers.map((customer) => {
-      // operations를 문자열로 변환
-      const operationsText = customer.operations
-        ?.map((op) => {
-          const parts = [];
-          if (op.operation) parts.push(op.operation);
-          if (op.operationSub) parts.push(op.operationSub);
-          if (op.herdSize) parts.push(`사육두수: ${op.herdSize}`);
-          return parts.join(' / ');
-        })
-        .join('; ') || '';
+    const formatDefaultAddressLine = (customer: {
+      addressRoad?: string | null;
+      addressJibun?: string | null;
+      addressDefaultType?: string | null;
+      address?: string | null;
+    }): string => {
+      const road = customer.addressRoad?.trim() || '';
+      const jibun = customer.addressJibun?.trim() || '';
+      const def = (customer.addressDefaultType?.trim() || '').toUpperCase();
+      if (def === 'JIBUN' || def === 'J' || def === 'LOT') return jibun || road || customer.address?.trim() || '';
+      return road || jibun || customer.address?.trim() || '';
+    };
 
-      return {
-        companyName: customer.companyName || '',
-        ceo: customer.ceo || '',
-        phone: customer.phone || '',
-        region: customer.regionEntity?.name || '',
-        city: customer.cityEntity?.name || '',
-        address: customer.address || '',
-        addressDetail: customer.addressDetail || '',
-        postalCode: customer.postalCode || '',
-        species: customer.species || '',
-        feeding: customer.feeding || '',
-        chamchamStatus: customer.chamchamStatus || '',
-        operations: operationsText,
-      };
-    });
+    // 고객 데이터를 시트 형식으로 변환
+    const sheetData = customers.map((customer) => ({
+      companyName: customer.companyName || '',
+      ceo: customer.ceo || '',
+      phone: customer.phone || '',
+      addressLine: formatDefaultAddressLine(customer),
+      addressDetail: customer.addressDetail || '',
+      postalCode: customer.postalCode || '',
+      chamchamStatus: customer.chamchamStatus || '',
+    }));
 
     return this.googleDriveService.writeCustomersToSheet(userId, spreadsheetId, sheetData, sheetGid);
   }

@@ -31,6 +31,11 @@ export class GetCustomersDto {
   @IsOptional()
   customerType?: string;
 
+  /** 회원등급 필터 — tb_code CUSTOMER_GRADE (cd_value 또는 cd_name) */
+  @IsString()
+  @IsOptional()
+  customerGrade?: string;
+
   /** 이벤트 SMS 응답 여부 필터 (쿼리: true/false) */
   @IsOptional()
   @Transform(({ value }) => {

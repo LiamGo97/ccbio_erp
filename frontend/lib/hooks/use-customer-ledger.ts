@@ -16,6 +16,8 @@ export interface CustomerLedgerEntry {
   paymentTermsValue?: number | null; // 결제조건 값
   /** 수금 행만 */
   isPrepayment?: boolean;
+  /** 거래명세서 품목 요약 (INVOICE) / 수금·선수금 라벨 (COLLECTION) */
+  productLabel?: string | null;
 }
 
 export interface CustomerLedgerResponse {

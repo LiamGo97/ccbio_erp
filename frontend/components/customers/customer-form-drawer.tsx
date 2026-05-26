@@ -34,7 +34,7 @@ import {
 import { useCodesByCategory } from '@/lib/hooks/use-codes';
 import { useRegions } from '@/lib/hooks/use-regions';
 import { useCities } from '@/lib/hooks/use-cities';
-import { Loader2, X, MapPin, Save, Plus, Folder, Eye } from 'lucide-react';
+import { Loader2, X, MapPin, Save, Folder, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -64,6 +64,7 @@ export interface CustomerFormData {
   phone?: string;
   customerType?: string;
   memberType?: string;
+  customerGrade?: string;
   businessRegistrationNumber?: string;
   businessCertGoogleDriveFileId?: string;
   businessCertFileName?: string;
@@ -175,6 +176,7 @@ export function CustomerFormDrawer({
       phone: '',
       customerType: 'FARM',
       memberType: '__none__',
+      customerGrade: 'GENERAL',
       businessRegistrationNumber: '',
       businessCertGoogleDriveFileId: '',
       businessCertFileName: '',
@@ -227,8 +229,6 @@ export function CustomerFormDrawer({
 
   const { data: regions } = useRegions();
   const watchedRegion = watch('region');
-  const selectedRegion =
-    watchedRegion && String(watchedRegion).trim() !== '' ? watchedRegion : '__none__';
   const selectedRegionId = React.useMemo(() => {
     const name = watchedRegion?.trim();
     if (name && regions?.length) {
@@ -261,14 +261,13 @@ export function CustomerFormDrawer({
     if (c?.name) setValue('city', c.name, { shouldDirty: false });
   }, [open, mode, customer?.id, customer?.cityId, cities, getValues, setValue]);
 
-  const { data: speciesCodes } = useCodesByCategory('SPECIES');
   const { data: operationCodes } = useCodesByCategory('OPERATION_TYPE');
   const { data: operationSubCodes } = useCodesByCategory('OPERATION_SUBTYPE');
-  const { data: feedingCodes } = useCodesByCategory('FEEDING_METHOD');
   const { data: chamchamCodes } = useCodesByCategory('CHAMCHAM_STATUS');
   const { data: chamcharmMemberCodes } = useCodesByCategory('CHAMCHARM_MEMBER_STATUS');
   const { data: customerTypeCodes } = useCodesByCategory('CUSTOMER_TYPE');
   const { data: memberTypeCodes } = useCodesByCategory('MEMBER_TYPE');
+  const { data: customerGradeCodes } = useCodesByCategory('CUSTOMER_GRADE');
   const { data: usersData } = useUsers({
     limit: 1000,
     status: 'active',
@@ -402,6 +401,19 @@ export function CustomerFormDrawer({
     [memberTypeCodes],
   );
 
+  const resolveCustomerGradeValue = React.useCallback(
+    (raw?: string | null) => {
+      if (!raw) return '__none__';
+      const codes = customerGradeCodes ?? [];
+      const byName = codes.find((c) => (c.name ?? '').trim() === raw.trim());
+      const byValue = codes.find((c) => (c.value ?? '').trim() === raw.trim());
+      if (byValue?.value) return byValue.value;
+      if (byName?.value) return byName.value;
+      return raw;
+    },
+    [customerGradeCodes],
+  );
+
   const operationOptions = React.useMemo(() => {
     return (operationCodes ?? [])
       .map((c) => ({
@@ -445,6 +457,7 @@ export function CustomerFormDrawer({
         phone: formatPhone(customer.phone || ''),
         customerType: resolveCustomerTypeValue(customer.customerType),
         memberType: resolveMemberTypeValue(customer.memberType),
+        customerGrade: resolveCustomerGradeValue(customer.customerGrade),
         businessRegistrationNumber: isBusinessMemberType(resolveMemberTypeValue(customer.memberType))
           ? customer.businessRegistrationNumber?.trim() || ''
           : '',
@@ -541,6 +554,7 @@ export function CustomerFormDrawer({
         phone: '',
         customerType: 'FARM',
         memberType: '__none__',
+        customerGrade: 'GENERAL',
         businessRegistrationNumber: '',
         businessCertGoogleDriveFileId: '',
         businessCertFileName: '',
@@ -596,46 +610,6 @@ export function CustomerFormDrawer({
     }
   }, [pendingCityName, cities, setValue]);
 
-  const addOperation = React.useCallback(() => {
-    setOperations((prev) => [
-      ...prev,
-      { id: Date.now().toString(), operation: '', operationSub: null, herdSize: null },
-    ]);
-  }, []);
-
-  const removeOperation = React.useCallback((id: string) => {
-    setOperations((prev) => (prev.length > 1 ? prev.filter((op) => op.id !== id) : prev));
-  }, []);
-
-  const updateOperation = React.useCallback(
-    (id: string, field: 'operation' | 'operationSub' | 'herdSize', value: string | number | null) => {
-      setOperations((prev) =>
-        prev.map((op) => {
-          if (op.id !== id) return op;
-          if (field === 'herdSize') {
-            return {
-              ...op,
-              herdSize:
-                value === '' || value === null
-                  ? null
-                  : typeof value === 'number'
-                    ? value
-                    : parseInt(String(value), 10) || null,
-            };
-          }
-          if (field === 'operationSub') {
-            return {
-              ...op,
-              operationSub: value === '__none__' || value === '' ? null : String(value),
-            };
-          }
-          return { ...op, operation: String(value), operationSub: null };
-        }),
-      );
-    },
-    [],
-  );
-
   const onSubmit = async (data: CustomerFormData) => {
     setIsSubmitting(true);
     try {
@@ -648,6 +622,8 @@ export function CustomerFormDrawer({
         }));
       const memberTypeRaw = data.memberType;
       const memberTypeEmpty = !memberTypeRaw || memberTypeRaw === '__none__';
+      const customerGradeRaw = data.customerGrade;
+      const customerGradeEmpty = !customerGradeRaw || customerGradeRaw === '__none__';
       const submitData: CreateCustomerDto | UpdateCustomerDto = {
         ...data,
         address:
@@ -669,6 +645,11 @@ export function CustomerFormDrawer({
           return mode === 'edit' ? '' : undefined;
         })(),
         memberType: memberTypeEmpty ? (mode === 'edit' ? '' : undefined) : memberTypeRaw,
+        customerGrade: customerGradeEmpty
+          ? mode === 'edit'
+            ? ''
+            : 'GENERAL'
+          : customerGradeRaw,
         businessRegistrationNumber:
           memberTypeRaw === 'BUSINESS'
             ? data.businessRegistrationNumber?.trim() || (mode === 'edit' ? '' : undefined)
@@ -770,8 +751,6 @@ export function CustomerFormDrawer({
     }
   }, [showBusinessRegistrationField]);
 
-  const selectedSpecies = watch('species') || '__none__';
-  const selectedFeeding = watch('feeding') || '__none__';
   const selectedChamchamStatus = watch('chamchamStatus') || '__none__';
   const selectedChamcharmMemberStatus = watch('chamcharmMemberStatus') || '__none__';
   const watchedLivestockTypes = watch('livestockTypes');
@@ -1109,6 +1088,28 @@ export function CustomerFormDrawer({
                           </SelectContent>
                         </Select>
                       </FormField>
+                      <FormField label="회원등급">
+                        <Select
+                          value={watch('customerGrade') || '__none__'}
+                          onValueChange={(value) =>
+                            setValue('customerGrade', value === '__none__' ? '__none__' : value, {
+                              shouldDirty: true,
+                            })
+                          }
+                        >
+                          <SelectTrigger id="customerGrade" className="h-9 w-full text-sm">
+                            <SelectValue placeholder="등급 선택" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">선택 안함</SelectItem>
+                            {(customerGradeCodes ?? []).map((code) => (
+                              <SelectItem key={code.id} value={code.value ?? code.name ?? ''}>
+                                {code.name ?? code.value ?? ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </FormField>
                       <FormField label="영업 담당자">
                         <Select
                           value={watch('salesManagerUserId') || '__none__'}
@@ -1246,113 +1247,6 @@ export function CustomerFormDrawer({
 
                   <section className="space-y-2.5">
                     <div>
-                      <h3 className="text-sm font-semibold text-foreground">농업경영체등록증</h3>
-                      <p className="text-xs text-muted-foreground">
-                        사업자·비사업자 구분과 관계없이 구글 드라이브에서 등록증 파일을 연결합니다.
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
-                      <div className="md:col-span-2 sm:col-span-2">
-                        <FormField label="파일 (Google Drive)">
-                          <div className="flex items-center gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => setFarmCertPickerOpen(true)}
-                              disabled={isSubmitting}
-                              className="flex-1 min-w-0 justify-start"
-                            >
-                              <Folder className="mr-2 h-4 w-4 flex-shrink-0" />
-                              <span className="truncate">
-                                {farmCertFile ? farmCertFile.name : '파일 선택'}
-                              </span>
-                            </Button>
-                            {farmCertFile ? (
-                              <>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="icon"
-                                  onClick={() => setFarmCertPreviewOpen(true)}
-                                  disabled={isSubmitting}
-                                  title="미리보기"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="icon"
-                                  onClick={() => {
-                                    setFarmCertFile(null);
-                                    setValue('farmManagementCertGoogleDriveFileId', '', { shouldDirty: true });
-                                    setValue('farmManagementCertFileName', '', { shouldDirty: true });
-                                  }}
-                                  disabled={isSubmitting}
-                                  title="선택 해제"
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
-                              </>
-                            ) : null}
-                          </div>
-                          {farmCertFile ? (
-                            <p
-                              className="text-xs text-muted-foreground mt-1 truncate"
-                              title={farmCertFile.name}
-                            >
-                              선택된 파일: {farmCertFile.name}
-                            </p>
-                          ) : null}
-                        </FormField>
-                      </div>
-                    </div>
-                  </section>
-
-                  <Separator />
-
-                  <section className="space-y-2.5">
-                    <div>
-                      <h3 className="text-sm font-semibold text-foreground">환불 계좌</h3>
-                      <p className="text-xs text-muted-foreground">환불 시 입금받을 계좌를 등록합니다.</p>
-                    </div>
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
-                      <FormField label="은행">
-                        <Input
-                          id="refundBankName"
-                          className="text-sm"
-                          placeholder="예: 국민은행"
-                          autoComplete="off"
-                          {...register('refundBankName')}
-                        />
-                      </FormField>
-                      <FormField label="계좌번호" className="md:col-span-2">
-                        <Input
-                          id="refundAccountNumber"
-                          className="font-mono text-sm tracking-tight"
-                          placeholder="계좌번호"
-                          inputMode="numeric"
-                          autoComplete="off"
-                          maxLength={32}
-                          {...register('refundAccountNumber')}
-                        />
-                      </FormField>
-                      <FormField label="예금주">
-                        <Input
-                          id="refundDepositor"
-                          className="text-sm"
-                          placeholder="이름"
-                          autoComplete="off"
-                          {...register('refundDepositor')}
-                        />
-                      </FormField>
-                    </div>
-                  </section>
-
-                  <Separator />
-
-                  <section className="space-y-2.5">
-                    <div>
                       <h3 className="text-sm font-semibold text-foreground">농장/축산 정보</h3>
                       <p className="text-xs text-muted-foreground">
                         축종/운영방식/급여방식/두수 정보를 입력합니다.
@@ -1427,11 +1321,10 @@ export function CustomerFormDrawer({
 
                   <section className="space-y-2.5">
                     <div>
-                      <h3 className="text-sm font-semibold text-foreground">주소 정보 (신규)</h3>
+                      <h3 className="text-sm font-semibold text-foreground">주소 정보</h3>
                       <p className="text-xs text-muted-foreground mt-1">
                         우편번호·법정동코드·도로명·지번·상세주소입니다. 도로명·지번 중{' '}
-                        <span className="text-foreground/90">기본</span>으로 쓸 주소를 선택할 수 있습니다.{' '}
-                        지역·주소는 아래 「기존 주소」에서 입력합니다.
+                        <span className="text-foreground/90">기본</span>으로 쓸 주소를 선택할 수 있습니다.
                       </p>
                     </div>
                     <div className="space-y-3">
@@ -1569,6 +1462,113 @@ export function CustomerFormDrawer({
 
                   <section className="space-y-2.5">
                     <div>
+                      <h3 className="text-sm font-semibold text-foreground">농업경영체등록증</h3>
+                      <p className="text-xs text-muted-foreground">
+                        사업자·비사업자 구분과 관계없이 구글 드라이브에서 등록증 파일을 연결합니다.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+                      <div className="md:col-span-2 sm:col-span-2">
+                        <FormField label="파일 (Google Drive)">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => setFarmCertPickerOpen(true)}
+                              disabled={isSubmitting}
+                              className="flex-1 min-w-0 justify-start"
+                            >
+                              <Folder className="mr-2 h-4 w-4 flex-shrink-0" />
+                              <span className="truncate">
+                                {farmCertFile ? farmCertFile.name : '파일 선택'}
+                              </span>
+                            </Button>
+                            {farmCertFile ? (
+                              <>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => setFarmCertPreviewOpen(true)}
+                                  disabled={isSubmitting}
+                                  title="미리보기"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => {
+                                    setFarmCertFile(null);
+                                    setValue('farmManagementCertGoogleDriveFileId', '', { shouldDirty: true });
+                                    setValue('farmManagementCertFileName', '', { shouldDirty: true });
+                                  }}
+                                  disabled={isSubmitting}
+                                  title="선택 해제"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </>
+                            ) : null}
+                          </div>
+                          {farmCertFile ? (
+                            <p
+                              className="text-xs text-muted-foreground mt-1 truncate"
+                              title={farmCertFile.name}
+                            >
+                              선택된 파일: {farmCertFile.name}
+                            </p>
+                          ) : null}
+                        </FormField>
+                      </div>
+                    </div>
+                  </section>
+
+                  <Separator />
+
+                  <section className="space-y-2.5">
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">환불 계좌</h3>
+                      <p className="text-xs text-muted-foreground">환불 시 입금받을 계좌를 등록합니다.</p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+                      <FormField label="은행">
+                        <Input
+                          id="refundBankName"
+                          className="text-sm"
+                          placeholder="예: 국민은행"
+                          autoComplete="off"
+                          {...register('refundBankName')}
+                        />
+                      </FormField>
+                      <FormField label="계좌번호" className="md:col-span-2">
+                        <Input
+                          id="refundAccountNumber"
+                          className="font-mono text-sm tracking-tight"
+                          placeholder="계좌번호"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          maxLength={32}
+                          {...register('refundAccountNumber')}
+                        />
+                      </FormField>
+                      <FormField label="예금주">
+                        <Input
+                          id="refundDepositor"
+                          className="text-sm"
+                          placeholder="이름"
+                          autoComplete="off"
+                          {...register('refundDepositor')}
+                        />
+                      </FormField>
+                    </div>
+                  </section>
+
+                  <Separator />
+
+                  <section className="space-y-2.5">
+                    <div>
                       <h3 className="text-sm font-semibold text-foreground">비고</h3>
                       <p className="text-xs text-muted-foreground">
                         담당자·내부 공유용 메모입니다. 목록 검색에도 포함됩니다.
@@ -1580,309 +1580,6 @@ export function CustomerFormDrawer({
                       rows={5}
                       {...register('remarks')}
                     />
-                  </section>
-
-                  <Separator />
-
-                  <section className="space-y-2.5">
-                    <div>
-                      <h3 className="text-sm font-semibold text-foreground">추가 정보</h3>
-                      <p className="text-xs text-muted-foreground">
-                        이벤트 응답 및 축종/사료형태 정보를 입력합니다.
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
-                      <FormField label="이벤트 SMS 응답">
-                        <div className="flex h-9 items-center gap-2 pt-0.5">
-                          <Checkbox
-                            id="eventSmsResponded"
-                            checked={watch('eventSmsResponded')}
-                            onCheckedChange={(v) =>
-                              setValue('eventSmsResponded', v === true, { shouldDirty: true })
-                            }
-                          />
-                          <Label htmlFor="eventSmsResponded" className="cursor-pointer text-sm font-normal">
-                            참여 고객
-                          </Label>
-                        </div>
-                      </FormField>
-                      <FormField label="축종">
-                        <Select
-                          value={selectedSpecies}
-                          onValueChange={(value) =>
-                            setValue('species', (value === '__none__' ? undefined : value) as never, {
-                              shouldDirty: true,
-                            })
-                          }
-                        >
-                          <SelectTrigger className="h-9 w-full text-sm">
-                            <SelectValue placeholder="축종을 선택하세요" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">선택 안함</SelectItem>
-                            {speciesCodes?.map((code) => (
-                              <SelectItem key={code.id} value={code.name}>
-                                {code.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </FormField>
-                      <FormField label="사료형태">
-                        <Select
-                          value={selectedFeeding}
-                          onValueChange={(value) =>
-                            setValue('feeding', (value === '__none__' ? undefined : value) as never, {
-                              shouldDirty: true,
-                            })
-                          }
-                        >
-                          <SelectTrigger className="h-9 w-full text-sm">
-                            <SelectValue placeholder="급여방식을 선택하세요" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">선택 안함</SelectItem>
-                            {feedingCodes?.map((code) => (
-                              <SelectItem key={code.id} value={code.name}>
-                                {code.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </FormField>
-                    </div>
-                  </section>
-
-                  <Separator />
-
-                  <section className="space-y-2.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <h3 className="text-sm font-semibold text-foreground">운영형태</h3>
-                        <p className="text-xs text-muted-foreground">
-                          주요 운영방식과 세부 유형, 사육두수 정보를 입력합니다.
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 shrink-0"
-                        onClick={addOperation}
-                      >
-                        <Plus className="mr-1 h-3 w-3" />
-                        추가
-                      </Button>
-                    </div>
-                    <div className="space-y-3">
-                      {operations.map((op) => (
-                        <div
-                          key={op.id}
-                          className="relative space-y-3 rounded-lg border bg-card/40 p-3"
-                        >
-                          {operations.length > 1 && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="absolute right-2 top-2 h-6 w-6 text-destructive hover:text-destructive"
-                              onClick={() => removeOperation(op.id)}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          )}
-                          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
-                            <FormField label="운영방식">
-                              <Select
-                                value={op.operation || '__none__'}
-                                onValueChange={(v) =>
-                                  updateOperation(op.id, 'operation', v === '__none__' ? '' : v)
-                                }
-                              >
-                                <SelectTrigger className="h-9 w-full text-sm">
-                                  <SelectValue placeholder="선택하세요" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">선택 안함</SelectItem>
-                                  {operationOptions.map((opt) => (
-                                    <SelectItem key={opt.value} value={opt.value}>
-                                      {opt.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </FormField>
-                            <FormField label="세부 유형">
-                              <Select
-                                value={op.operationSub || '__none__'}
-                                onValueChange={(v) =>
-                                  updateOperation(op.id, 'operationSub', v === '__none__' ? null : v)
-                                }
-                                disabled={!op.operation || op.operation === 'COMPANY'}
-                              >
-                                <SelectTrigger className="h-9 w-full text-sm">
-                                  <SelectValue
-                                    placeholder={op.operation === 'COMPANY' ? '세부 유형 없음' : '선택하세요'}
-                                  />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">선택 안함</SelectItem>
-                                  {operationSubOptions
-                                    .filter((opt) => {
-                                      if (op.operation === 'BEEF') {
-                                        return ['INTEGRATED', 'BREEDING', 'FATTENING', 'RAISING'].includes(opt.value);
-                                      }
-                                      if (op.operation === 'DAIRY') {
-                                        return ['MILKING', 'DRY_MILKING'].includes(opt.value);
-                                      }
-                                      return false;
-                                    })
-                                    .map((opt) => (
-                                      <SelectItem key={opt.value} value={opt.value}>
-                                        {opt.label}
-                                      </SelectItem>
-                                    ))}
-                                </SelectContent>
-                              </Select>
-                            </FormField>
-                            <FormField label="사육두수">
-                              <Input
-                                type="number"
-                                className="text-sm"
-                                placeholder="사육두수"
-                                value={op.herdSize ?? ''}
-                                onChange={(e) =>
-                                  updateOperation(
-                                    op.id,
-                                    'herdSize',
-                                    e.target.value ? parseInt(e.target.value, 10) : null,
-                                  )
-                                }
-                              />
-                            </FormField>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-
-                  <Separator />
-
-                  <section className="space-y-2.5">
-                    <div>
-                      <h3 className="text-sm font-semibold text-foreground">기존 주소 (레거시)</h3>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        전환 전 시스템·연동용 지역과 주소입니다. 상세주소는 위 「주소 정보 (신규)」의
-                        상세주소와 동일 필드이므로 한 곳에서만 수정하면 됩니다.
-                      </p>
-                    </div>
-                    <div className="space-y-3 rounded-md border border-amber-500/35 bg-muted/30 p-3">
-                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
-                        <FormField label="지역">
-                          <Select
-                            value={selectedRegion}
-                            onValueChange={(value) => {
-                              setValue('region', (value === '__none__' ? undefined : value) as never, {
-                                shouldDirty: true,
-                              });
-                              if (value === '__none__') {
-                                setValue('city', undefined as never, { shouldDirty: true });
-                                setPendingCityName(null);
-                              }
-                            }}
-                          >
-                            <SelectTrigger className="h-9 w-full text-sm">
-                              <SelectValue placeholder="지역" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">선택 안함</SelectItem>
-                              {selectedRegion !== '__none__' &&
-                                regions?.length &&
-                                !regions.some((r) => r.name === selectedRegion) && (
-                                  <SelectItem value={selectedRegion}>{selectedRegion} (등록값)</SelectItem>
-                                )}
-                              {regions?.map((region) => (
-                                <SelectItem key={region.id} value={region.name}>
-                                  {region.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </FormField>
-                        <FormField label="시/군/구">
-                          <Select
-                            value={
-                              watchedCity && String(watchedCity).trim() !== ''
-                                ? watchedCity
-                                : '__none__'
-                            }
-                            onValueChange={(value) =>
-                              setValue('city', (value === '__none__' ? undefined : value) as never, {
-                                shouldDirty: true,
-                              })
-                            }
-                            disabled={selectedRegionId == null}
-                          >
-                            <SelectTrigger className="h-9 w-full text-sm">
-                              <SelectValue
-                                placeholder={
-                                  selectedRegionId != null ? '시/군/구' : '지역 선택 후'
-                                }
-                              />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">선택 안함</SelectItem>
-                              {watchedCity?.trim() &&
-                                cities?.length &&
-                                !cities.some((c) => c.name === watchedCity) && (
-                                  <SelectItem value={watchedCity}>{watchedCity} (등록값)</SelectItem>
-                                )}
-                              {cities?.map((city, index) => {
-                                const cityKey =
-                                  city?.id != null && city.id !== undefined
-                                    ? `city-${city.id}`
-                                    : `city-${selectedRegionId ?? 'all'}-${index}`;
-                                return (
-                                  <SelectItem key={cityKey} value={city.name}>
-                                    {city.name}
-                                  </SelectItem>
-                                );
-                              })}
-                            </SelectContent>
-                          </Select>
-                        </FormField>
-                        <FormField label="우편번호" className="sm:col-span-2 md:col-span-2">
-                          <div className="flex gap-2">
-                            <Input
-                              id="legacyPostalCode"
-                              className="cursor-pointer bg-muted text-sm"
-                              placeholder="우편번호"
-                              readOnly
-                              value={watchedPostalCode || ''}
-                              onClick={handleAddressSearch}
-                            />
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="icon"
-                              className="h-9 shrink-0"
-                              title="주소검색"
-                              onClick={handleAddressSearch}
-                            >
-                              <MapPin className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </FormField>
-                        <FormField label="기존 주소" className="sm:col-span-2 md:col-span-4">
-                          <Input
-                            id="legacyAddress"
-                            className="text-sm"
-                            placeholder="기존 시스템에서 쓰던 주소 한 줄"
-                            {...register('address')}
-                          />
-                        </FormField>
-                      </div>
-                    </div>
                   </section>
 
                   {mode === 'edit' && customer ? (

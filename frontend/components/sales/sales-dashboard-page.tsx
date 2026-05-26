@@ -414,6 +414,13 @@ function formatMonthDay(value?: string | null): string {
   return `${date.getMonth() + 1}월 ${date.getDate()}일`;
 }
 
+function getOrderDestinationName(order: {
+  destinationName?: string | null;
+  finalDestinationName?: string | null;
+}): string {
+  return (order.destinationName ?? order.finalDestinationName ?? '').trim();
+}
+
 function escapeCsvCell(value: string | number): string {
   const s = String(value ?? '');
   if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
@@ -740,6 +747,7 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
       productName: string | null;
       exporterName: string | null;
       etaDate: string | null;
+      destinationName: string | null;
       notes: string | null;
       invoiceAmount: number | null;
       invoiceCurrency: string | null;
@@ -756,6 +764,7 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
         productName: first.product ?? first.productName ?? null,
         exporterName: first.exporterName ?? first.exporter ?? null,
         etaDate: first.etaDate ?? null,
+        destinationName: (first as { destinationName?: string | null }).destinationName ?? null,
         notes: first.notes ?? null,
         invoiceAmount: first.invoiceAmount != null ? Number(first.invoiceAmount) : null,
         invoiceCurrency: first.invoiceCurrency ?? null,
@@ -947,6 +956,10 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
           aVal = a.etaDate ? new Date(a.etaDate).getTime() : 0;
           bVal = b.etaDate ? new Date(b.etaDate).getTime() : 0;
           return order * (aVal - bVal);
+        case 'destinationName':
+          aVal = getOrderDestinationName(a);
+          bVal = getOrderDestinationName(b);
+          break;
         case 'inboundWarehouse':
           aVal = getWarehouseName(a.confirmedInbound?.warehouse ?? a.pendingInbound?.warehouse ?? null) || '';
           bVal = getWarehouseName(b.confirmedInbound?.warehouse ?? b.pendingInbound?.warehouse ?? null) || '';
@@ -1021,6 +1034,10 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
           aVal = a.etaDate ? new Date(a.etaDate).getTime() : 0;
           bVal = b.etaDate ? new Date(b.etaDate).getTime() : 0;
           return order * (aVal - bVal);
+        case 'destinationName':
+          aVal = getOrderDestinationName(a);
+          bVal = getOrderDestinationName(b);
+          break;
         case 'inboundWarehouse':
           aVal = getWarehouseName(a.pendingInbound?.warehouse ?? null) || '';
           bVal = getWarehouseName(b.pendingInbound?.warehouse ?? null) || '';
@@ -2223,7 +2240,7 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
                       size="sm"
                       className="shrink-0 no-print"
                       onClick={() => {
-                        const headers = ['상품명', 'BL', '수출사', '등급', '컨 수량', '예약', '가용재고', '입항일', '입고 창고', '입고일정', '검역일정', '송장 금액', '비고'];
+                        const headers = ['상품명', 'BL', '수출사', '등급', '컨 수량', '예약', '가용재고', '입항예정', '도착항', '입고 창고', '입고일정', '검역일정', '송장 금액', '비고'];
                         const rows: (string | number)[][] = inboundScheduledOrdersVisible.map((order) => {
                           const warehouseName = getWarehouseName(order.pendingInbound?.warehouse ?? null) || '';
                           const igodate = formatMonthDay(order.pendingInbound?.igodate) || '';
@@ -2240,6 +2257,7 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
                             reservedDisplay > 0 ? Number(reservedDisplay.toFixed(1)) : '',
                             availableDisplay > 0 ? Number(availableDisplay.toFixed(1)) : '',
                             formatMonthDay(order.etaDate),
+                            getOrderDestinationName(order),
                             warehouseName,
                             igodate,
                             quarantineDate,
@@ -2290,7 +2308,8 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
                             { key: 'containerCount', label: '컨 수량', className: 'min-w-[55px]', align: 'right' as const },
                             { key: 'reservedCnt', label: '예약', className: 'min-w-[55px]', align: 'right' as const },
                             { key: 'availableCnt', label: '가용재고', className: 'min-w-[55px]', align: 'right' as const },
-                            { key: 'etaDate', label: '입항일', className: 'min-w-[65px]', align: 'left' as const },
+                            { key: 'etaDate', label: '입항예정', className: 'min-w-[65px]', align: 'left' as const },
+                            { key: 'destinationName', label: '도착항', className: 'min-w-[70px]', align: 'left' as const },
                             { key: 'inboundWarehouse', label: '입고 창고', className: 'min-w-[90px]', align: 'left' as const },
                             { key: 'inboundSchedule', label: '이고일정', className: 'min-w-[65px]', align: 'left' as const },
                             { key: 'quarantineSchedule', label: '검역일정', className: 'min-w-[65px]', align: 'left' as const },
@@ -2342,6 +2361,7 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
                                 {availableDisplay > 0 ? availableDisplay.toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '-'}
                               </TableCell>
                               <TableCell className="text-sm">{formatMonthDay(order.etaDate)}</TableCell>
+                              <TableCell className="text-sm">{getOrderDestinationName(order) || '-'}</TableCell>
                               <TableCell className="text-sm">{warehouseName}</TableCell>
                               <TableCell className="text-sm">{igodate}</TableCell>
                               <TableCell className="text-sm">{quarantineDate}</TableCell>
@@ -2368,7 +2388,7 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
                           <TableCell className="text-sm text-right tabular-nums">
                             {inboundScheduledOrdersSorted.reduce((sum, o) => sum + getInboundScheduledDisplayCounts(o.containers ?? []).availableDisplay, 0).toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                           </TableCell>
-                          <TableCell className="text-sm" colSpan={4} />
+                          <TableCell className="text-sm" colSpan={5} />
                           <TableCell className="text-sm text-right tabular-nums">
                             {allSameCurrency && withInv.length > 0 ? formatInvoiceAmount(sumAmount, sumCurrency) : withInv.length > 0 ? '혼합통화' : '-'}
                           </TableCell>
@@ -2415,7 +2435,8 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
                         '컨 수량',
                         '예약',
                         '가용재고',
-                        '입항일',
+                        '입항예정',
+                        '도착항',
                         '입고 창고',
                         '입고일정',
                         '검역일정',
@@ -2436,6 +2457,7 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
                           reservedDisplay > 0 ? Number(reservedDisplay.toFixed(1)) : '',
                           availableDisplay > 0 ? Number(availableDisplay.toFixed(1)) : '',
                           formatMonthDay(order.etaDate),
+                          getOrderDestinationName(order),
                           getWarehouseName(warehouseCode) || warehouseCode,
                           inboundSchedule,
                           quarantineSchedule,
@@ -2481,7 +2503,8 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
                             { key: 'containerCount', label: '컨 수량', className: 'min-w-[55px]', align: 'right' as const },
                             { key: 'reservedCnt', label: '예약', className: 'min-w-[55px]', align: 'right' as const },
                             { key: 'availableCnt', label: '가용재고', className: 'min-w-[55px]', align: 'right' as const },
-                            { key: 'etaDate', label: '입항일', className: 'min-w-[65px]', align: 'left' as const },
+                            { key: 'etaDate', label: '입항예정', className: 'min-w-[65px]', align: 'left' as const },
+                            { key: 'destinationName', label: '도착항', className: 'min-w-[70px]', align: 'left' as const },
                             { key: 'inboundWarehouse', label: '입고 창고', className: 'min-w-[70px]', align: 'left' as const },
                             { key: 'inboundSchedule', label: '입고일정', className: 'min-w-[65px]', align: 'left' as const },
                             { key: 'quarantineSchedule', label: '검역일정', className: 'min-w-[65px]', align: 'left' as const },
@@ -2548,6 +2571,7 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
                                   : '-'}
                               </TableCell>
                               <TableCell className="text-sm">{formatMonthDay(order.etaDate)}</TableCell>
+                              <TableCell className="text-sm">{getOrderDestinationName(order) || '-'}</TableCell>
                               <TableCell className="text-sm">{inboundWarehouse}</TableCell>
                               <TableCell className="text-sm">{inboundSchedule}</TableCell>
                               <TableCell className="text-sm">{quarantineSchedule}</TableCell>
@@ -2579,7 +2603,7 @@ export function SalesDashboardPage({ variant = 'full' }: SalesDashboardPageProps
                               .reduce((sum, o) => sum + getTradeOrderInboundScheduledDisplayCounts(o).availableDisplay, 0)
                               .toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                           </TableCell>
-                          <TableCell className="text-sm" colSpan={4} />
+                          <TableCell className="text-sm" colSpan={5} />
                           <TableCell className="text-sm text-right tabular-nums">
                             {allSameCurrency && withInv.length > 0 ? formatInvoiceAmount(sumAmount, sumCurrency) : withInv.length > 0 ? '혼합통화' : '-'}
                           </TableCell>

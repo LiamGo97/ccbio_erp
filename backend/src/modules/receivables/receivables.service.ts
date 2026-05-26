@@ -100,6 +100,8 @@ export interface LedgerEntry {
   paymentTermsValue?: number | null; // 결제조건 값
   /** 수금( COLLECTION ) 행만 */
   isPrepayment?: boolean;
+  /** 거래명세서 품목 요약 (INVOICE 행) */
+  productLabel?: string | null;
 }
 
 export interface CustomerLedgerResponse {
@@ -533,6 +535,15 @@ export class ReceivablesService {
     });
   }
 
+  /** 거래명세서 품목명 목록 → 목록/활동 이력용 한 줄 라벨 */
+  private formatInvoiceProductLabel(names: string[]): string {
+    const unique = [...new Set(names.map((n) => n.trim()).filter((n) => n.length > 0))];
+    if (unique.length === 0) return '품목 미정';
+    if (unique.length === 1) return unique[0];
+    if (unique.length === 2) return `${unique[0]}, ${unique[1]}`;
+    return `${unique[0]} 외 ${unique.length - 1}건`;
+  }
+
   /**
    * 거래처관리대장 조회
    * 거래명세서와 수금을 날짜순으로 표시하고 잔액 계산
@@ -576,6 +587,29 @@ export class ReceivablesService {
     }
 
     const invoices = await invoiceQuery.getMany();
+
+    const productLabelByInvoiceId = new Map<string, string>();
+    if (invoices.length > 0) {
+      const invoiceIds = invoices.map((inv) => inv.id);
+      const invoiceItems = await this.dataSource
+        .getRepository(InvoiceItem)
+        .createQueryBuilder('item')
+        .select(['item.invoiceId', 'item.productName', 'item.order'])
+        .where('item.invoiceId IN (:...invoiceIds)', { invoiceIds })
+        .orderBy('item.order', 'ASC')
+        .addOrderBy('item.id', 'ASC')
+        .getMany();
+      const namesByInvoiceId = new Map<string, string[]>();
+      invoiceItems.forEach((item) => {
+        const key = String(item.invoiceId);
+        const list = namesByInvoiceId.get(key) ?? [];
+        list.push((item.productName ?? '').trim());
+        namesByInvoiceId.set(key, list);
+      });
+      namesByInvoiceId.forEach((names, invId) => {
+        productLabelByInvoiceId.set(invId, this.formatInvoiceProductLabel(names));
+      });
+    }
 
     // 수금 조회
     const receivable = await this.receivableRepository.findOne({
@@ -666,6 +700,7 @@ export class ReceivablesService {
         paymentDueDate: paymentDueDateStr,
         paymentTermsType: paymentTermsType,
         paymentTermsValue: paymentTermsValue ?? null,
+        productLabel: productLabelByInvoiceId.get(String(invoice.id)) ?? '품목 미정',
       });
     });
 
@@ -691,6 +726,7 @@ export class ReceivablesService {
         balance: 0, // 나중에 계산
         notes: collection.notes || null,
         isPrepayment: collection.isPrepayment ?? false,
+        productLabel: collection.isPrepayment ? '선수금 수금' : '수금',
       });
     });
 

@@ -2889,6 +2889,219 @@ export class SalesDeliveryService {
     this.logger.log(`[softDeleteBySalesId] 판매 예약 변경 - 배송 소프트 삭제 완료 salesId: ${salesId}, deliveryId: ${delivery.id}`);
   }
 
+  /** 상차·하차 작업 데이터가 쌓인 뒤 판매 수정 시 loadingItems 전량 삭제 금지 */
+  private static readonly PRESERVE_LOADING_ITEM_DELIVERY_STATUSES = new Set([
+    'LOADING_COMPLETED',
+    'UNLOADING_COMPLETED',
+  ]);
+
+  private loadingItemHasOperationalData(item: SalesDeliveryLoadingItem): boolean {
+    return !!(
+      (item.workBL != null && String(item.workBL).trim() !== '') ||
+      (item.workContainer != null && String(item.workContainer).trim() !== '') ||
+      (item.actualBL != null && String(item.actualBL).trim() !== '') ||
+      (item.actualContainer != null && String(item.actualContainer).trim() !== '') ||
+      item.actualBales != null ||
+      item.actualWeight != null ||
+      item.loadingSchedule != null
+    );
+  }
+
+  private snapshotLoadingItemOperationalFields(
+    item: SalesDeliveryLoadingItem,
+  ): Partial<SalesDeliveryLoadingItem> {
+    return {
+      loadingSchedule: item.loadingSchedule ?? null,
+      loadingScheduleTime: item.loadingScheduleTime ?? null,
+      requestNotes: item.requestNotes ?? null,
+      workBL: item.workBL ?? null,
+      workContainer: item.workContainer ?? null,
+      workContainerType: item.workContainerType ?? null,
+      workWeight: item.workWeight != null ? Number(item.workWeight) : null,
+      workBales: item.workBales != null ? Number(item.workBales) : null,
+      actualBL: item.actualBL ?? null,
+      actualContainer: item.actualContainer ?? null,
+      actualContainerType: item.actualContainerType ?? null,
+      actualBales: item.actualBales != null ? Number(item.actualBales) : null,
+      actualWeight: item.actualWeight != null ? Number(item.actualWeight) : null,
+      status: item.status ?? 'PENDING',
+    };
+  }
+
+  private applyLoadingItemOperationalFields(
+    target: SalesDeliveryLoadingItem,
+    preserved: Partial<SalesDeliveryLoadingItem>,
+  ): void {
+    if (preserved.loadingSchedule !== undefined) target.loadingSchedule = preserved.loadingSchedule;
+    if (preserved.loadingScheduleTime !== undefined) target.loadingScheduleTime = preserved.loadingScheduleTime;
+    if (preserved.requestNotes !== undefined) target.requestNotes = preserved.requestNotes;
+    if (preserved.workBL !== undefined) target.workBL = preserved.workBL;
+    if (preserved.workContainer !== undefined) target.workContainer = preserved.workContainer;
+    if (preserved.workContainerType !== undefined) target.workContainerType = preserved.workContainerType;
+    if (preserved.workWeight !== undefined) target.workWeight = preserved.workWeight;
+    if (preserved.workBales !== undefined) target.workBales = preserved.workBales;
+    if (preserved.actualBL !== undefined) target.actualBL = preserved.actualBL;
+    if (preserved.actualContainer !== undefined) target.actualContainer = preserved.actualContainer;
+    if (preserved.actualContainerType !== undefined) target.actualContainerType = preserved.actualContainerType;
+    if (preserved.actualBales !== undefined) target.actualBales = preserved.actualBales;
+    if (preserved.actualWeight !== undefined) target.actualWeight = preserved.actualWeight;
+    if (preserved.status !== undefined) target.status = preserved.status;
+  }
+
+  private async resolveLoadingItemRequestFields(
+    salesItem: SalesItem,
+    salesItemRepository: Repository<SalesItem>,
+  ): Promise<{
+    requestBL: string | null;
+    requestContainer: string | null;
+    requestContainerType: 'CONTAINER' | 'CARGO' | null;
+    requestBales: number | null;
+    requestWeight: number | null;
+  }> {
+    let salesItemWithRelations = salesItem;
+    if (!salesItem.container || !salesItem.container?.order) {
+      const foundItem = await salesItemRepository.findOne({
+        where: { id: salesItem.id },
+        relations: ['container', 'container.order'],
+      });
+      if (foundItem) {
+        salesItemWithRelations = foundItem;
+      }
+    }
+    const container = salesItemWithRelations.container;
+    const order = container?.order;
+    return {
+      requestBL: order?.bl || null,
+      requestContainer: container?.containerNo || null,
+      requestContainerType: salesItemWithRelations.containerType || null,
+      requestBales: salesItemWithRelations.cargoBales
+        ? parseFloat(salesItemWithRelations.cargoBales.toString())
+        : null,
+      requestWeight: salesItemWithRelations.cargoWeight
+        ? parseFloat(salesItemWithRelations.cargoWeight.toString())
+        : null,
+    };
+  }
+
+  /** 하차완료 등: 삭제 없이 요청 정보만 갱신, work/actual 유지 */
+  private async syncLoadingItemsPreserveOperational(
+    savedDelivery: SalesDelivery,
+    soldItems: SalesItem[],
+    loadingItemRepository: Repository<SalesDeliveryLoadingItem>,
+    salesItemRepository: Repository<SalesItem>,
+  ): Promise<void> {
+    const existingItems = await loadingItemRepository.find({
+      where: { salesDeliveryId: savedDelivery.id },
+      order: { order: 'ASC' },
+    });
+    const bySalesItemId = new Map(existingItems.map((i) => [String(i.salesItemId), i]));
+    const soldIds = new Set(soldItems.map((si) => String(si.id)));
+
+    let order = 1;
+    for (const salesItem of soldItems) {
+      const request = await this.resolveLoadingItemRequestFields(salesItem, salesItemRepository);
+      const existing = bySalesItemId.get(String(salesItem.id));
+      if (existing) {
+        existing.requestBL = request.requestBL;
+        existing.requestContainer = request.requestContainer;
+        existing.requestContainerType = request.requestContainerType;
+        existing.requestBales = request.requestBales;
+        existing.requestWeight = request.requestWeight;
+        existing.order = order++;
+        await loadingItemRepository.save(existing);
+        continue;
+      }
+      const created = loadingItemRepository.create({
+        salesDeliveryId: savedDelivery.id,
+        salesItemId: salesItem.id,
+        ...request,
+        status: 'PENDING',
+        order: order++,
+      });
+      await loadingItemRepository.save(created);
+    }
+
+    for (const item of existingItems) {
+      if (soldIds.has(String(item.salesItemId))) continue;
+      if (this.loadingItemHasOperationalData(item)) {
+        this.logger.warn(
+          `[createFromSales] 판매 항목에서 제외됐으나 work/actual·상차일정이 있어 상차 행 유지 - sdli_id=${item.id}, salesItemId=${item.salesItemId}`,
+        );
+        continue;
+      }
+      await loadingItemRepository.remove(item);
+      this.logger.log(
+        `[createFromSales] 미사용 상차 행 삭제 - sdli_id=${item.id}, salesItemId=${item.salesItemId}`,
+      );
+    }
+  }
+
+  private async reloadDeliveryWithLoadingItems(
+    deliveryId: string,
+    manager?: any,
+  ): Promise<SalesDelivery | null> {
+    const repo = manager ? manager.getRepository(SalesDelivery) : this.salesDeliveryRepository;
+    return repo.findOne({
+      where: { id: deliveryId },
+      relations: ['loadingItems'],
+    });
+  }
+
+  private async writeCreateFromSalesAuditLog(options: {
+    existingDelivery: SalesDelivery | null;
+    savedDelivery: SalesDelivery;
+    salesId: string;
+    userId?: number;
+    oldDataJson: Record<string, unknown> | null;
+    newDataJson: Record<string, unknown>;
+    preserveMode: boolean;
+  }): Promise<void> {
+    const { existingDelivery, savedDelivery, salesId, userId, oldDataJson, newDataJson, preserveMode } =
+      options;
+    const deliveryId = String(savedDelivery.id);
+    const entityId = parseInt(deliveryId, 10) || undefined;
+
+    if (existingDelivery) {
+      await this.featureAuditLogService
+        .create({
+          domain: 'SALES',
+          feature: 'TRANSPORT',
+          action: 'UPDATED',
+          userId: userId ?? null,
+          summary: preserveMode
+            ? `배송 #${deliveryId} 상차 항목 동기화 (판매 #${salesId} 수정, work/actual 유지)`
+            : `배송 #${deliveryId} 상차 항목 동기화 (판매 #${salesId} 수정)`,
+          entityType: 'sales_delivery',
+          entityId,
+          payload: {
+            deliveryId,
+            salesId,
+            source: 'createFromSales',
+            preserveOperationalLoadingItems: preserveMode,
+            previousStatus: existingDelivery.status ?? null,
+          },
+          oldData: oldDataJson ?? undefined,
+          newData: newDataJson,
+        })
+        .catch((err) => this.logger.warn('[기능이력] createFromSales 배송 동기화 로그 저장 실패', err));
+      return;
+    }
+
+    await this.featureAuditLogService
+      .create({
+        domain: 'SALES',
+        feature: 'TRANSPORT',
+        action: 'CREATED',
+        userId: userId ?? null,
+        summary: `배송 #${deliveryId} 자동 생성 (판매 #${salesId})`,
+        entityType: 'sales_delivery',
+        entityId,
+        payload: { deliveryId, salesId, source: 'createFromSales' },
+        newData: newDataJson,
+      })
+      .catch((err) => this.logger.warn('[기능이력] createFromSales 배송 생성 로그 저장 실패', err));
+  }
+
   /**
    * 판매에서 배송 자동 생성
    * 판매 항목 중 SALES_ITEM_SOLD(판매), SALES_ITEM_COMPLETED(판매완료), SALES_ITEM_RESERVED(판매예약=입고예정) 중 하나라도 있으면 배송 생성
@@ -2941,9 +3154,18 @@ export class SalesDeliveryService {
     const customer = salesWithCustomer.customer;
 
     let savedDelivery: SalesDelivery;
-    
+    const oldDataJsonForAudit: Record<string, unknown> | null = existingDelivery
+      ? (this.deliveryToJson(existingDelivery) as Record<string, unknown>)
+      : null;
+    const preserveOperationalItems =
+      !!existingDelivery?.status &&
+      SalesDeliveryService.PRESERVE_LOADING_ITEM_DELIVERY_STATUSES.has(existingDelivery.status);
+
     if (existingDelivery) {
-      this.logger.log(`[createFromSales] 판매 ID ${sales.id}에는 이미 배송이 존재합니다. loadingItems 동기화 시작.`);
+      this.logger.log(
+        `[createFromSales] 판매 ID ${sales.id}에는 이미 배송이 존재합니다. loadingItems 동기화 시작. ` +
+          `status=${existingDelivery.status}, preserveOperational=${preserveOperationalItems}`,
+      );
       savedDelivery = existingDelivery;
 
       // 판매예약 → 판매 전환 시: 소프트 삭제된 배송 복원 (운송관리 목록에 다시 노출)
@@ -2954,10 +3176,68 @@ export class SalesDeliveryService {
         this.logger.log(`[createFromSales] 소프트 삭제된 배송 복원 - salesId: ${sales.id}, deliveryId: ${existingDelivery.id}`);
       }
 
-      // 기존 loadingItems 삭제 (판매 항목 변경에 맞춰 재생성하기 위해)
-      if (existingDelivery.loadingItems && existingDelivery.loadingItems.length > 0) {
-        await loadingItemRepository.remove(existingDelivery.loadingItems);
-        this.logger.log(`[createFromSales] 기존 loadingItems ${existingDelivery.loadingItems.length}개 삭제 완료`);
+      const salesItemRepository = manager
+        ? manager.getRepository(SalesItem)
+        : this.salesItemRepository;
+      const soldItems = salesItems.filter(
+        (item) =>
+          item.status === 'SALES_ITEM_SOLD' ||
+          item.status === 'SALES_ITEM_COMPLETED' ||
+          item.status === 'SALES_ITEM_RESERVED',
+      );
+
+      if (preserveOperationalItems) {
+        await this.syncLoadingItemsPreserveOperational(
+          savedDelivery,
+          soldItems,
+          loadingItemRepository,
+          salesItemRepository,
+        );
+        this.logger.log(
+          `[createFromSales] ${existingDelivery.status} — 기존 loadingItems 삭제 없이 요청 정보만 동기화 (${soldItems.length}건)`,
+        );
+      } else {
+        const preservedBySalesItemId = new Map<string, Partial<SalesDeliveryLoadingItem>>();
+        if (existingDelivery.loadingItems && existingDelivery.loadingItems.length > 0) {
+          for (const item of existingDelivery.loadingItems) {
+            if (this.loadingItemHasOperationalData(item)) {
+              preservedBySalesItemId.set(
+                String(item.salesItemId),
+                this.snapshotLoadingItemOperationalFields(item),
+              );
+            }
+          }
+          await loadingItemRepository.remove(existingDelivery.loadingItems);
+          this.logger.log(
+            `[createFromSales] 기존 loadingItems ${existingDelivery.loadingItems.length}개 삭제 완료` +
+              (preservedBySalesItemId.size > 0
+                ? ` (work/actual 병합 대상 ${preservedBySalesItemId.size}건)`
+                : ''),
+          );
+        }
+
+        let order = 1;
+        for (const salesItem of soldItems) {
+          const request = await this.resolveLoadingItemRequestFields(salesItem, salesItemRepository);
+          const created = loadingItemRepository.create({
+            salesDeliveryId: savedDelivery.id,
+            salesItemId: salesItem.id,
+            ...request,
+            status: 'PENDING',
+            order: order++,
+          });
+          const preserved = preservedBySalesItemId.get(String(salesItem.id));
+          if (preserved) {
+            this.applyLoadingItemOperationalFields(created, preserved);
+            this.logger.log(
+              `[createFromSales] salesItemId=${salesItem.id} 상차 work/actual 병합 적용`,
+            );
+          }
+          await loadingItemRepository.save(created);
+        }
+        if (soldItems.length > 0) {
+          this.logger.log(`[createFromSales] 상차 항목 ${soldItems.length}개 재생성 완료`);
+        }
       }
     } else {
       this.logger.log(`[createFromSales] 판매 ID ${sales.id}에서 배송 자동 생성 시작`);
@@ -3019,73 +3299,61 @@ export class SalesDeliveryService {
       });
 
       savedDelivery = await deliveryRepository.save(delivery);
-    }
 
-    // 상차 항목 생성 (각 SalesItem마다 개별 상차 항목 생성)
-    const salesItemRepository = manager ? manager.getRepository(SalesItem) : this.salesItemRepository;
-    
-    // 판매(SOLD), 판매완료(COMPLETED), 판매예약(RESERVED=입고예정) 항목을 상차 항목으로 생성 (취소 제외, 수정 시 항목 수 일치)
-    const soldItems = salesItems.filter(
-      (item) =>
-        item.status === 'SALES_ITEM_SOLD' ||
-        item.status === 'SALES_ITEM_COMPLETED' ||
-        item.status === 'SALES_ITEM_RESERVED',
-    );
-    
-    // 각 SalesItem마다 개별 상차 항목 생성
-    const loadingItems = await Promise.all(soldItems.map(async (salesItem, index) => {
-      // SalesItem을 container와 order 관계를 포함하여 조회 (요청 정보 초기화용)
-      let salesItemWithRelations = salesItem;
-      if (!salesItem.container || !salesItem.container?.order) {
-        const foundItem = await salesItemRepository.findOne({
-          where: { id: salesItem.id },
-          relations: ['container', 'container.order'],
+      const salesItemRepository = manager
+        ? manager.getRepository(SalesItem)
+        : this.salesItemRepository;
+      const soldItems = salesItems.filter(
+        (item) =>
+          item.status === 'SALES_ITEM_SOLD' ||
+          item.status === 'SALES_ITEM_COMPLETED' ||
+          item.status === 'SALES_ITEM_RESERVED',
+      );
+
+      let order = 1;
+      for (const salesItem of soldItems) {
+        const request = await this.resolveLoadingItemRequestFields(salesItem, salesItemRepository);
+        const created = loadingItemRepository.create({
+          salesDeliveryId: savedDelivery.id,
+          salesItemId: salesItem.id,
+          ...request,
+          status: 'PENDING',
+          order: order++,
         });
-        if (foundItem) {
-          salesItemWithRelations = foundItem;
-        }
+        await loadingItemRepository.save(created);
       }
-
-      const container = salesItemWithRelations.container;
-      const order = container?.order;
-      
-      // 요청 정보 초기화 (SalesItem의 현재 정보를 요청 정보로 저장)
-      const requestBL = order?.bl || null;
-      const requestContainer = container?.containerNo || null;
-      const requestContainerType = salesItemWithRelations.containerType || null;
-      const requestBales = salesItemWithRelations.cargoBales ? parseFloat(salesItemWithRelations.cargoBales.toString()) : null;
-      const requestWeight = salesItemWithRelations.cargoWeight ? parseFloat(salesItemWithRelations.cargoWeight.toString()) : null;
-
-      // 상차 항목 생성 (요청 정보 포함)
-      return loadingItemRepository.create({
-        salesDeliveryId: savedDelivery.id,
-        salesItemId: salesItem.id, // SalesItem 참조
-        // 요청 정보 초기화
-        requestBL,
-        requestContainer,
-        requestContainerType,
-        requestBales,
-        requestWeight,
-        status: 'PENDING',
-        order: index + 1,
-      });
-    }));
-
-    // 상차 항목 저장
-    if (loadingItems.length > 0) {
-      await loadingItemRepository.save(loadingItems);
-      this.logger.log(`[createFromSales] 상차 항목 ${loadingItems.length}개 생성 완료`);
-    } else {
-      this.logger.warn(`[createFromSales] 생성할 상차 항목이 없습니다.`);
+      if (soldItems.length > 0) {
+        this.logger.log(`[createFromSales] 상차 항목 ${soldItems.length}개 생성 완료`);
+      } else {
+        this.logger.warn(`[createFromSales] 생성할 상차 항목이 없습니다.`);
+      }
     }
 
     if (existingDelivery) {
-      this.logger.log(`[createFromSales] 배송 loadingItems 동기화 완료 - ID: ${savedDelivery.id}, salesId: ${savedDelivery.salesId}`);
+      this.logger.log(
+        `[createFromSales] 배송 loadingItems 동기화 완료 - ID: ${savedDelivery.id}, salesId: ${savedDelivery.salesId}`,
+      );
     } else {
-      this.logger.log(`[createFromSales] 배송 자동 생성 완료 - ID: ${savedDelivery.id}, salesId: ${savedDelivery.salesId}`);
+      this.logger.log(
+        `[createFromSales] 배송 자동 생성 완료 - ID: ${savedDelivery.id}, salesId: ${savedDelivery.salesId}`,
+      );
     }
 
-    return savedDelivery;
+    const reloaded = await this.reloadDeliveryWithLoadingItems(String(savedDelivery.id), manager);
+    const newDataJson = (reloaded
+      ? this.deliveryToJson(reloaded)
+      : this.deliveryToJson(savedDelivery)) as Record<string, unknown>;
+    await this.writeCreateFromSalesAuditLog({
+      existingDelivery,
+      savedDelivery,
+      salesId: String(sales.id),
+      userId,
+      oldDataJson: oldDataJsonForAudit,
+      newDataJson,
+      preserveMode: preserveOperationalItems,
+    });
+
+    return reloaded ?? savedDelivery;
   }
 
   /**

@@ -13,6 +13,23 @@ export interface CustomerStatementName {
   updatedAt: string;
 }
 
+export interface CustomerContact {
+  id: string;
+  customerId: string;
+  name: string;
+  phone?: string | null;
+  relationship?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerContactInput {
+  id?: string;
+  name: string;
+  phone?: string | null;
+  relationship?: string | null;
+}
+
 export interface CustomerDeliveryAddress {
   id: string;
   customerId: string;
@@ -49,6 +66,8 @@ export interface Customer {
   customerType?: string | null; // FARM(농가) | DISTRIBUTION(유통)
   /** 이커머스 회원구분: API는 tb_code 한글명으로 내려올 수 있음 */
   memberType?: string | null;
+  /** 회원등급 — API는 tb_code 한글명으로 내려올 수 있음 */
+  customerGrade?: string | null;
   businessRegistrationNumber?: string | null;
   businessCertGoogleDriveFileId?: string | null;
   businessCertFileName?: string | null;
@@ -82,6 +101,7 @@ export interface Customer {
   consultationCount?: number;
   operations?: CustomerOperation[]; // 운영방식 배열
   statementNames?: CustomerStatementName[]; // 거래명세서 발행용 이름 목록
+  contacts?: CustomerContact[];
   deliveryAddresses?: CustomerDeliveryAddress[];
   /** 카카오 법정동코드(b_code) 저장값 */
   legalBCode?: string | null;
@@ -108,6 +128,8 @@ export interface GetCustomersParams {
   region?: string;
   chamchamStatus?: string;
   customerType?: string;
+  /** CUSTOMER_GRADE cd_value 또는 표시명 */
+  customerGrade?: string;
   species?: string;
   operation?: string;
   operationSub?: string;
@@ -153,6 +175,7 @@ export interface CreateCustomerDto {
   phone: string;
   customerType?: string;
   memberType?: string | null;
+  customerGrade?: string | null;
   businessRegistrationNumber?: string;
   businessCertGoogleDriveFileId?: string | null;
   businessCertFileName?: string | null;
@@ -177,6 +200,7 @@ export interface CreateCustomerDto {
   eventSmsResponded?: boolean;
   remarks?: string;
   operations?: CustomerOperation[]; // 운영방식 배열
+  contacts?: CustomerContactInput[];
 }
 
 export interface UpdateCustomerDto {
@@ -194,6 +218,7 @@ export interface UpdateCustomerDto {
   phone?: string;
   customerType?: string;
   memberType?: string | null;
+  customerGrade?: string | null;
   businessRegistrationNumber?: string | null;
   businessCertGoogleDriveFileId?: string | null;
   businessCertFileName?: string | null;
@@ -218,6 +243,7 @@ export interface UpdateCustomerDto {
   eventSmsResponded?: boolean;
   remarks?: string | null;
   operations?: CustomerOperation[]; // 운영방식 배열
+  contacts?: CustomerContactInput[];
 }
 
 // 고객 목록 조회 (페이지네이션)
@@ -370,6 +396,61 @@ export function useUpdateStatementName(customerId: string | undefined) {
         data,
       );
       return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+    },
+  });
+}
+
+export interface CreateCustomerContactDto {
+  name: string;
+  phone?: string | null;
+  relationship?: string | null;
+}
+
+export type UpdateCustomerContactDto = Partial<CreateCustomerContactDto>;
+
+export function useAddCustomerContact(customerId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: CreateCustomerContactDto) => {
+      const response = await api.post<CustomerContact>(`/customers/${customerId}/contacts`, data);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+    },
+  });
+}
+
+export function useUpdateCustomerContact(customerId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      contactId,
+      data,
+    }: {
+      contactId: string;
+      data: UpdateCustomerContactDto;
+    }) => {
+      const response = await api.patch<CustomerContact>(
+        `/customers/${customerId}/contacts/${contactId}`,
+        data,
+      );
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+    },
+  });
+}
+
+export function useRemoveCustomerContact(customerId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (contactId: string) => {
+      await api.delete(`/customers/${customerId}/contacts/${contactId}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['customers'] });
